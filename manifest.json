@@ -1,0 +1,18 @@
+{
+  "id": "anichin-care-test",
+  "name": "Anichin Care (Test)",
+  "description": "Uji pemuatan provider Nuvio. Belum mengambil atau memutar video.",
+  "version": "0.1.0",
+  "providers": [
+    {
+      "id": "anichin-care",
+      "name": "Anichin Care",
+      "description": "Provider uji kompatibilitas Nuvio untuk judul Soul Land.",
+      "filename": "providers/anichin-care.js",
+      "enabled": true,
+      "supportedTypes": [
+        "tv"
+      ]
+    }
+  ]
+}
