@@ -12,135 +12,181 @@ const WORKING_HEADERS = {
 
 function getTitleFromTmdb(tmdbId, mediaType) {
   const type = mediaType === 'movie' ? 'movie' : 'tv';
-  const url = 'https://api.themoviedb.org/3/' + type + '/' + tmdbId +
-              '?api_key=' + TMDB_API_KEY + '&language=en-US';
+  const url = 'https://api.themoviedb.org/3/' + type + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
   return fetch(url)
     .then(function (r) { return r.json(); })
     .then(function (d) { return d.name || d.original_name || d.title || d.original_title || ''; })
     .catch(function () { return ''; });
 }
 
-function isHomepage(url) {
-  if (!url) return false;
-  var u = url.replace(/\/$/, '');
-  var b = BASE_URL.replace(/\/$/, '');
-  return u === b;
-}
-
+// 1. SEARCH menggunakan WP REST API (menghindari blokir ?s=)
 function searchAnichin(title) {
   if (!title) return Promise.resolve('');
-  var url = BASE_URL + '/?s=' + encodeURIComponent(title);
-  return fetch(url, { headers: WORKING_HEADERS })
-    .then(function (r) {
-      if (isHomepage(r.url)) throw new Error('search redirected');
-      return r.text();
+  
+  // Coba WP REST API dulu
+  var wpApiUrl = BASE_URL + '/wp-json/wp/v2/search?search=' + encodeURIComponent(title) + '&per_page=5';
+  
+  return fetch(wpApiUrl, { headers: WORKING_HEADERS })
+    .then(function(res) {
+      if (!res.ok) throw new Error('REST API failed');
+      return res.json();
     })
-    .then(function (html) {
-      var cheerio = require('cheerio-without-node-native');
-      var $ = cheerio.load(html);
-      var slug = '';
-      $('.bsx').each(function (i, el) {
-        if (slug) return;
-        var href = $(el).find('a.tip').attr('href') || $(el).find('a').first().attr('href') || '';
-        if (!href) return;
-        var clean = href.replace(/\/$/, '');
-        var parts = clean.split('/');
-        var last = parts[parts.length - 1];
-        if (last && last.length > 2 && last.indexOf('?') === -1 && last.indexOf('-episode-') === -1) {
-          slug = last;
-        }
-      });
-      return slug;
+    .then(function(data) {
+      if (data && data.length > 0) {
+        // Ambil URL dari hasil pertama, ekstrak slug-nya
+        var link = data[0].url;
+        return link.replace(/\/$/, '').split('/').pop();
+      }
+      throw new Error('No results');
     })
-    .catch(function () { return ''; });
+    .catch(function() {
+      // Fallback ke ?s= jika REST API gagal
+      var url = BASE_URL + '/?s=' + encodeURIComponent(title);
+      return fetch(url, { headers: WORKING_HEADERS })
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          var cheerio = require('cheerio-without-node-native');
+          var $ = cheerio.load(html);
+          var slug = '';
+          $('.bsx').each(function(i, el) {
+             if(slug) return;
+             var href = $(el).find('a.tip').attr('href') || $(el).find('a').first().attr('href') || '';
+             if(href) slug = href.replace(/\/$/, '').split('/').pop();
+          });
+          return slug;
+        });
+    });
 }
 
-function extractStreamsFromHtml(html) {
-  var cheerio = require('cheerio-without-node-native');
-  var $ = cheerio.load(html);
+// 2. EKSTRAKSI STREAM DARI HTML (Iframe, Select, Regex, AJAX)
+function extractStreams(html) {
   var streams = [];
   var seen = {};
-
+  
   function add(url, name) {
     if (!url || !/^https?:/.test(url)) return;
     if (url.indexOf('anichin.moe') !== -1) return;
-    if (url === 'about:blank') return;
     if (seen[url]) return;
     seen[url] = true;
     var server = name || '';
-    try { server = new URL(url).hostname.replace('www.', ''); } catch (e) {}
+    try { server = new URL(url).hostname.replace('www.', ''); } catch(e) {}
     streams.push({ url: url, server: server });
   }
 
-  $('iframe').each(function (i, el) { add($(el).attr('src'), null); });
-  $('select option').each(function (i, el) {
-    var v = $(el).attr('value') || $(el).val();
-    if (v && /^https?:/.test(v)) add(v, $(el).text().trim());
-  });
-  $('[data-video], [data-src], [data-embed]').each(function (i, el) {
-    add($(el).attr('data-video') || $(el).attr('data-src') || $(el).attr('data-embed'), null);
+  // A. Cari <iframe>
+  var iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
+  var match;
+  while ((match = iframeRegex.exec(html)) !== null) add(match[1]);
+
+  // B. Cari <select> option (server list) atau link video
+  var cheerio = require('cheerio-without-node-native');
+  var $ = cheerio.load(html);
+  
+  $('select option, .mirror li').each(function(i, el) {
+    var val = $(el).val() || $(el).attr('data-video') || $(el).attr('data-src') || $(el).attr('data-url');
+    var text = $(el).text().trim();
+    if (val && /^https?:/.test(val)) add(val, text);
   });
 
-  if (streams.length === 0) {
-    var re = /(https?:\/\/[^"'\s<>\\]+\.(?:m3u8|mp4)[^"'\s<>\\]*)/gi;
-    var m;
-    while ((m = re.exec(html)) !== null) add(m[1], null);
+  // C. Regex untuk host streaming umum (Okru, Dailymotion, dll)
+  var hostRegex = /(https?:\/\/(?:[^"'\s<>\\]+\.)?(?:ok\.ru|dailymotion\.com|rumble\.com|odysee\.com|streamruby\.com|vidhide\.com|vidara\.to|d-tube\.net|vidsrc\.me|embed[^"'\s<>\\]+)\/[^"'\s<>\\]+)/gi;
+  while ((match = hostRegex.exec(html)) !== null) add(match[1]);
+
+  // D. Deteksi AJAX Player (jika stream dimuat lewat JS)
+  var ajaxUrl = null;
+  var postId = $('.player').attr('data-post') || $('[data-post]').attr('data-post');
+  if (postId) {
+    var nume = $('.player').attr('data-nume') || $('[data-nume]').attr('data-nume') || '1';
+    var type = $('.player').attr('data-type') || $('[data-type]').attr('data-type') || 'tv';
+    ajaxUrl = BASE_URL + '/wp-admin/admin-ajax.php?action=player_ajax&post=' + postId + '&nume=' + nume + '&type=' + type;
   }
 
-  return streams;
+  return { streams: streams, ajaxUrl: ajaxUrl };
 }
 
-function tryFetchAndExtract(urls, title, episodeNum) {
-  return new Promise(function (resolve) {
-    var index = 0;
-    function next() {
-      if (index >= urls.length) return resolve([]);
-      var url = urls[index++];
-      fetch(url, { headers: WORKING_HEADERS })
-        .then(function (r) {
-          if (isHomepage(r.url)) throw new Error('redirect to home');
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.text();
-        })
-        .then(function (html) {
-          var streams = extractStreamsFromHtml(html);
-          if (streams.length === 0) throw new Error('no streams');
-          resolve(streams.map(function (s, i) {
-            return {
-              name: 'Anichin - ' + (s.server || ('Server ' + (i + 1))),
-              title: title + ' Episode ' + episodeNum,
-              url: s.url,
-              quality: '1080p',
-              size: 'Unknown',
-              headers: WORKING_HEADERS,
-              provider: 'anichin-care'
-            };
-          }));
-        })
-        .catch(function () { next(); });
-    }
-    next();
+// 3. CARI EPISODE DARI HALAMAN SERIES
+function findEpisodeUrl(seriesHtml, episodeNum) {
+  var cheerio = require('cheerio-without-node-native');
+  var $ = cheerio.load(seriesHtml);
+  var found = '';
+
+  $('a').each(function (i, el) {
+    if (found) return;
+    var href = $(el).attr('href');
+    if (!href || href.indexOf('-episode-') === -1) return;
+
+    var m = href.match(/-episode-(\d+)/i);
+    var num = m ? parseInt(m[1], 10) : null;
+
+    if (num === episodeNum) found = href;
   });
+  return found;
 }
 
+// 4. FUNGSI UTAMA
 function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
   return new Promise(function (resolve) {
     getTitleFromTmdb(tmdbId, mediaType)
       .then(function (title) {
         if (!title) return resolve([]);
+        
         searchAnichin(title).then(function (slug) {
           if (!slug) return resolve([]);
 
-          // ✅ Pattern URL yang benar (dari contoh user):
-          // {BASE_URL}/{slug}-episode-{num}-subtitle-indonesia/
-          var urls = [
-            BASE_URL + '/' + slug + '-episode-' + episodeNum + '-subtitle-indonesia/',
-            BASE_URL + '/' + slug + '-episode-' + episodeNum + '/',
-            BASE_URL + '/watch/' + slug + '-episode-' + episodeNum + '-subtitle-indonesia/',
-            BASE_URL + '/' + slug + '/'   // fallback untuk movie
-          ];
+          // Ambil halaman series untuk mencari link episode
+          var seriesUrl = BASE_URL + '/' + slug + '/';
+          
+          fetch(seriesUrl, { headers: WORKING_HEADERS })
+            .then(function(r) { return r.text(); })
+            .then(function(seriesHtml) {
+              var episodeUrl = findEpisodeUrl(seriesHtml, episodeNum);
+              
+              // Jika tidak ada link episode, berarti ini Movie, pakai URL series
+              var targetUrl = episodeUrl ? (episodeUrl.startsWith('http') ? episodeUrl : BASE_URL + episodeUrl) : seriesUrl;
+              
+              return fetch(targetUrl, { headers: WORKING_HEADERS })
+                .then(function(r) { return r.text(); })
+                .then(function(playerHtml) {
+                  var ext = extractStreams(playerHtml);
+                  
+                  if (ext.streams.length > 0) {
+                    return resolve(ext.streams.map(function(s, i) {
+                      return {
+                        name: 'Anichin - ' + (s.server || ('Server ' + (i + 1))),
+                        title: title + ' Episode ' + episodeNum,
+                        url: s.url,
+                        quality: '1080p',
+                        size: 'Unknown',
+                        headers: WORKING_HEADERS,
+                        provider: 'anichin-care'
+                      };
+                    }));
+                  }
 
-          tryFetchAndExtract(urls, title, episodeNum).then(resolve);
+                  // Jika tidak ada stream tapi ada AJAX endpoint, panggil AJAX-nya
+                  if (ext.ajaxUrl) {
+                    fetch(ext.ajaxUrl, { headers: WORKING_HEADERS })
+                      .then(function(r) { return r.text(); })
+                      .then(function(ajaxHtml) {
+                        var ajaxExt = extractStreams(ajaxHtml);
+                        resolve(ajaxExt.streams.map(function(s, i) {
+                          return {
+                            name: 'Anichin - ' + (s.server || ('Server ' + (i + 1))),
+                            title: title + ' Episode ' + episodeNum,
+                            url: s.url,
+                            quality: '1080p',
+                            size: 'Unknown',
+                            headers: WORKING_HEADERS,
+                            provider: 'anichin-care'
+                          };
+                        }));
+                      });
+                  } else {
+                    resolve([]);
+                  }
+                });
+            })
+            .catch(function() { resolve([]); });
         });
       })
       .catch(function () { resolve([]); });
