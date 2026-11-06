@@ -1,8 +1,8 @@
 // providers/anichin-care.js
-// Plugin Anichin dinamis untuk Nuvio (mendukung semua donghua)
+// Plugin Anichin dinamis untuk Nuvio (Advanced Search + fallback ?s=)
 
 const BASE_URL = 'https://anichin.moe';
-const TMDB_API_KEY = '1865f43a0549ca50d341dd9ab8b29f49'; // Kunci publik dari provider lain
+const TMDB_API_KEY = '1865f43a0549ca50d341dd9ab8b29f49';
 
 const WORKING_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -12,62 +12,158 @@ const WORKING_HEADERS = {
   'Origin': BASE_URL
 };
 
-// Fungsi untuk mengambil judul dari TMDB berdasarkan tmdbId
+// 1) Ambil judul dari TMDB (en-US)
 function getTitleFromTmdb(tmdbId, mediaType) {
   const type = mediaType === 'movie' ? 'movie' : 'tv';
-  const url = `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&language=id-ID`;
+  const url = 'https://api.themoviedb.org/3/' + type + '/' + tmdbId +
+              '?api_key=' + TMDB_API_KEY + '&language=en-US';
 
   return fetch(url)
-    .then(res => res.json())
-    .then(data => {
-      // Prioritaskan judul bahasa Indonesia, lalu judul asli
-      return data.title || data.name || data.original_title || data.original_name || '';
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      return data.name || data.original_name || data.title || data.original_title || '';
     })
-    .catch(() => '');
+    .catch(function () { return ''; });
 }
 
-// Fungsi untuk mencari slug series di Anichin berdasarkan judul
-function searchAnichin(title) {
+// 2) Ambil daftar series via Advanced Search (/seri/) dan cocokkan judul
+function searchAnichinAdvanced(title) {
   if (!title) return Promise.resolve('');
 
-  const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(title)}`;
+  // per_page=100 untuk memperbesar peluang menemukan judul
+  var advancedUrl = BASE_URL + '/seri/?per_page=100&order=latest';
 
-  return fetch(searchUrl, { headers: WORKING_HEADERS })
-    .then(res => res.text())
-    .then(html => {
-      // Menggunakan cheerio untuk parsing yang lebih stabil
-      const cheerio = require('cheerio-without-node-native');
-      const $ = cheerio.load(html);
-      let slug = '';
+  return fetch(advancedUrl, { headers: WORKING_HEADERS })
+    .then(function (res) { return res.text(); })
+    .then(function (html) {
+      var cheerio = require('cheerio-without-node-native');
+      var $ = cheerio.load(html);
+      var target = title.toLowerCase().trim();
+      var slug = '';
 
-      // Cari link yang mengarah ke halaman series.
-      // Biasanya ada di dalam artikel atau elemen dengan class tertentu.
-      $('a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (!href || slug) return;
+      // Parser Anichin: setiap series ada di dalam .bsx
+      $('.bsx').each(function (i, el) {
+        if (slug) return;
+        var link = $(el).find('a.tip').attr('href') || $(el).find('a').first().attr('href') || '';
+        var cardTitle = $(el).find('.tt').text().trim() || $(el).find('h2').text().trim() || '';
 
-        // Filter link yang kemungkinan besar adalah halaman series
-        // Contoh: https://anichin.moe/soul-land/ atau /soul-land/
-        if (href.includes('anichin.moe/') && !href.includes('?s=') && !href.includes('/genres/') && !href.includes('/studio/')) {
-          // Ambil slug dari URL
-          const parts = href.replace(/\/$/, '').split('/');
-          const lastPart = parts[parts.length - 1];
-          // Pastikan bukan halaman statis
-          if (lastPart && lastPart !== 'anichin.moe' && lastPart.length > 2) {
-            slug = lastPart;
+        if (!link || !cardTitle) return;
+
+        // Cocokkan judul (case-insensitive)
+        if (cardTitle.toLowerCase().indexOf(target) !== -1) {
+          var clean = link.replace(/\/$/, '');
+          var parts = clean.split('/');
+          var last = parts[parts.length - 1];
+          if (last && last.length > 2 && !last.includes('?') && !last.includes('.')) {
+            slug = last;
           }
         }
       });
 
       return slug;
     })
-    .catch(() => '');
+    .catch(function () { return ''; });
 }
 
-// Fungsi utama yang dipanggil Nuvio
+// 3) Fallback: pencarian ?s= (lebih akurat untuk judul spesifik)
+function searchAnichinFallback(title) {
+  if (!title) return Promise.resolve('');
+
+  var searchUrl = BASE_URL + '/?s=' + encodeURIComponent(title);
+
+  return fetch(searchUrl, { headers: WORKING_HEADERS })
+    .then(function (res) { return res.text(); })
+    .then(function (html) {
+      var cheerio = require('cheerio-without-node-native');
+      var $ = cheerio.load(html);
+      var slug = '';
+
+      $('.bsx').each(function (i, el) {
+        if (slug) return;
+        var href = $(el).find('a.tip').attr('href') || $(el).find('a').first().attr('href') || '';
+        if (!href) return;
+
+        var clean = href.replace(/\/$/, '');
+        var parts = clean.split('/');
+        var last = parts[parts.length - 1];
+
+        if (last && last.length > 2 && !last.includes('?') && !last.includes('.')) {
+          slug = last;
+        }
+      });
+
+      return slug;
+    })
+    .catch(function () { return ''; });
+}
+
+// 4) Orkestrasi: Advanced Search dulu, lalu fallback ?s=
+function searchAnichin(title) {
+  return searchAnichinAdvanced(title).then(function (slug) {
+    if (slug) return slug;
+    return searchAnichinFallback(title);
+  });
+}
+
+// 5) Pola URL episode
+function buildEpisodeUrls(slug, episodeNum) {
+  return [
+    BASE_URL + '/' + slug + '-episode-' + episodeNum + '/',
+    BASE_URL + '/watch/' + slug + '-episode-' + episodeNum + '/',
+    BASE_URL + '/' + slug + '/episode-' + episodeNum + '/',
+    BASE_URL + '/' + slug + '-episode-' + episodeNum,
+    BASE_URL + '/watch/' + slug + '-episode-' + episodeNum
+  ];
+}
+
+// 6) Ekstrak stream dari HTML halaman episode
+function extractStreamsFromHtml(html, title, episodeNum) {
+  var iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
+  var match;
+  var urls = [];
+  var seen = {};
+
+  while ((match = iframeRegex.exec(html)) !== null) {
+    var src = match[1];
+    if (src && src !== 'about:blank' && !seen[src]) {
+      seen[src] = true;
+      urls.push(src);
+    }
+  }
+
+  if (urls.length === 0) {
+    var m3u8Regex = /(https?:\/\/[^"']+\.m3u8[^"']*)/gi;
+    var m3u8Match;
+    while ((m3u8Match = m3u8Regex.exec(html)) !== null) {
+      var m3u8 = m3u8Match[1];
+      if (!seen[m3u8]) {
+        seen[m3u8] = true;
+        urls.push(m3u8);
+      }
+    }
+  }
+
+  return urls.map(function (url, i) {
+    var serverName = 'Server ' + (i + 1);
+    try {
+      serverName = new URL(url).hostname.replace('www.', '');
+    } catch (e) {}
+
+    return {
+      name: 'Anichin - ' + serverName,
+      title: title + ' Episode ' + episodeNum,
+      url: url,
+      quality: '1080p',
+      size: 'Unknown',
+      headers: WORKING_HEADERS,
+      provider: 'anichin-care'
+    };
+  });
+}
+
+// 7) getStreams utama
 function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
   return new Promise(function (resolve) {
-    // Langkah 1: Dapatkan judul dari TMDB
     getTitleFromTmdb(tmdbId, mediaType)
       .then(function (title) {
         if (!title) {
@@ -75,113 +171,53 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
           return resolve([]);
         }
 
-        // Langkah 2: Cari slug series di Anichin
         return searchAnichin(title).then(function (slug) {
           if (!slug) {
             console.log('[Anichin] Series tidak ditemukan untuk judul:', title);
             return resolve([]);
           }
 
-          console.log(`[Anichin] Ditemukan slug: ${slug} untuk judul: ${title}`);
+          console.log('[Anichin] Slug ditemukan:', slug, 'untuk:', title);
 
-          // Langkah 3: Bangun URL episode.
-          // Pola URL episode di Anichin bervariasi. Kita coba beberapa pola umum.
-          const episodeUrls = [
-            `${BASE_URL}/${slug}-episode-${episodeNum}`,
-            `${BASE_URL}/${slug}/episode-${episodeNum}`,
-            `${BASE_URL}/watch/${slug}-episode-${episodeNum}`
-          ];
+          var urls = buildEpisodeUrls(slug, episodeNum);
+          var index = 0;
 
-          // Coba satu per satu hingga menemukan halaman yang valid
-          let index = 0;
-          function tryNextUrl() {
-            if (index >= episodeUrls.length) {
-              console.log('[Anichin] Tidak ada URL episode yang valid untuk slug:', slug);
+          function tryNext() {
+            if (index >= urls.length) {
+              console.log('[Anichin] Tidak ada URL episode valid untuk slug:', slug);
               return resolve([]);
             }
 
-            const episodeUrl = episodeUrls[index++];
+            var episodeUrl = urls[index++];
 
             fetch(episodeUrl, { headers: WORKING_HEADERS })
-              .then(function (response) {
-                if (!response.ok) {
-                  throw new Error('Status: ' + response.status);
-                }
-                return response.text();
+              .then(function (res) {
+                if (!res.ok) throw new Error('Status ' + res.status);
+                return res.text();
               })
               .then(function (html) {
-                // Langkah 4: Ekstrak iframe/m3u8 dari halaman episode
-                const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-                let match;
-                const streamUrls = [];
-                const seenUrls = {};
-
-                while ((match = iframeRegex.exec(html)) !== null) {
-                  const src = match[1];
-                  if (src && src !== 'about:blank' && !seenUrls[src]) {
-                    seenUrls[src] = true;
-                    streamUrls.push(src);
-                  }
-                }
-
-                // Fallback: cari link .m3u8 langsung
-                if (streamUrls.length === 0) {
-                  const m3u8Regex = /(https?:\/\/[^"']+\.m3u8[^"']*)/gi;
-                  let m3u8Match;
-                  while ((m3u8Match = m3u8Regex.exec(html)) !== null) {
-                    const m3u8Url = m3u8Match[1];
-                    if (!seenUrls[m3u8Url]) {
-                      seenUrls[m3u8Url] = true;
-                      streamUrls.push(m3u8Url);
-                    }
-                  }
-                }
-
-                if (streamUrls.length === 0) {
-                  // Jika tidak ada stream, coba URL berikutnya
-                  return tryNextUrl();
-                }
-
-                // Langkah 5: Bangun objek stream untuk Nuvio
-                const streams = streamUrls.map(function (url, i) {
-                  let serverName = 'Server ' + (i + 1);
-                  try {
-                    const urlObj = new URL(url);
-                    serverName = urlObj.hostname.replace('www.', '');
-                  } catch (e) {}
-
-                  return {
-                    name: 'Anichin - ' + serverName,
-                    title: title + ' Episode ' + episodeNum,
-                    url: url,
-                    quality: '1080p',
-                    size: 'Unknown',
-                    headers: WORKING_HEADERS,
-                    provider: 'anichin-care'
-                  };
-                });
-
+                var streams = extractStreamsFromHtml(html, title, episodeNum);
+                if (streams.length === 0) return tryNext();
                 resolve(streams);
               })
               .catch(function () {
-                // Jika fetch gagal, coba URL berikutnya
-                tryNextUrl();
+                tryNext();
               });
           }
 
-          tryNextUrl();
+          tryNext();
         });
       })
-      .catch(function (error) {
-        console.error('[Anichin] Error:', error.message);
+      .catch(function (err) {
+        console.error('[Anichin] Error:', err.message);
         resolve([]);
       });
   });
 }
 
-// Ekspor untuk kompatibilitas React Native / Hermes
+// Ekspor untuk React Native / Hermes
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { getStreams: getStreams };
 } else {
   global.getStreams = getStreams;
-}
+    }
