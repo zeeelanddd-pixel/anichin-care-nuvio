@@ -1,200 +1,531 @@
-// providers/anichin-care.js
-const BASE_URL = 'https://anichin.moe';
-const TMDB_API_KEY = '1865f43a0549ca50d341dd9ab8b29f49';
+/*
+ * Anichin Care — provider Nuvio untuk anichin.moe
+ *
+ * Aturan runtime (Hermes / React Native): tanpa async/await, tanpa API Node, tanpa `new URL()`.
+ * Alur:
+ *   TMDB id -> judul -> cari halaman episode -> ambil daftar server (select.mirror, iframe base64)
+ *   -> resolve embed (Okru / Dailymotion / Rumble / generik) menjadi URL m3u8/mp4 langsung.
+ *
+ * Catatan: Nuvio hanya bisa memutar URL media langsung (m3u8/mp4). URL halaman embed
+ * (mis. https://ok.ru/videoembed/123) TIDAK bisa diputar, jadi harus di-resolve dulu.
+ */
+var cheerio = require('cheerio-without-node-native');
 
-const WORKING_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-  'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Referer': BASE_URL + '/',
-  'Origin': BASE_URL
-};
+/* ───────────── Konfigurasi ───────────── */
+var PROVIDER_ID = 'anichin-care';
+var PROVIDER_NAME = 'Anichin';
+var BASES = ['https://anichin.moe']; // tambahkan domain cadangan di sini bila situs pindah
+// Nuvio biasanya menyuntikkan TMDB_API_KEY. Jika tidak ada, isi key TMDB gratis Anda di sini.
+var TMDB_KEY = (typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? TMDB_API_KEY : '';
+var REQ_TIMEOUT = 9000;    // batas per request (ms)
+var TOTAL_BUDGET = 40000;  // batas total satu panggilan getStreams (ms)
+var UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-function getTitleFromTmdb(tmdbId, mediaType) {
-  const type = mediaType === 'movie' ? 'movie' : 'tv';
-  const url = 'https://api.themoviedb.org/3/' + type + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
-  return fetch(url)
-    .then(function (r) { return r.json(); })
-    .then(function (d) { return d.name || d.original_name || d.title || d.original_title || ''; })
-    .catch(function () { return ''; });
+/* ───────────── Util umum ───────────── */
+function log() {
+  try {
+    var a = ['[AnichinCare]'];
+    for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
+    console.log.apply(console, a);
+  } catch (e) {}
 }
 
-// 1. SEARCH menggunakan WP REST API (menghindari blokir ?s=)
-function searchAnichin(title) {
-  if (!title) return Promise.resolve('');
-  
-  // Coba WP REST API dulu
-  var wpApiUrl = BASE_URL + '/wp-json/wp/v2/search?search=' + encodeURIComponent(title) + '&per_page=5';
-  
-  return fetch(wpApiUrl, { headers: WORKING_HEADERS })
-    .then(function(res) {
-      if (!res.ok) throw new Error('REST API failed');
-      return res.json();
-    })
-    .then(function(data) {
-      if (data && data.length > 0) {
-        // Ambil URL dari hasil pertama, ekstrak slug-nya
-        var link = data[0].url;
-        return link.replace(/\/$/, '').split('/').pop();
-      }
-      throw new Error('No results');
-    })
-    .catch(function() {
-      // Fallback ke ?s= jika REST API gagal
-      var url = BASE_URL + '/?s=' + encodeURIComponent(title);
-      return fetch(url, { headers: WORKING_HEADERS })
-        .then(function(r) { return r.text(); })
-        .then(function(html) {
-          var cheerio = require('cheerio-without-node-native');
-          var $ = cheerio.load(html);
-          var slug = '';
-          $('.bsx').each(function(i, el) {
-             if(slug) return;
-             var href = $(el).find('a.tip').attr('href') || $(el).find('a').first().attr('href') || '';
-             if(href) slug = href.replace(/\/$/, '').split('/').pop();
-          });
-          return slug;
-        });
+function unique(arr) {
+  var seen = {}, out = [];
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i] && !seen[arr[i]]) { seen[arr[i]] = 1; out.push(arr[i]); }
+  }
+  return out;
+}
+
+function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/&quot;|&#34;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#x([0-9a-f]+);/gi, function (m, h) { return String.fromCharCode(parseInt(h, 16)); })
+    .replace(/&#(\d+);/g, function (m, d) { return String.fromCharCode(parseInt(d, 10)); })
+    .replace(/&amp;/g, '&');
+}
+
+// Base64 manual (jaga-jaga atob tidak tersedia di Hermes)
+function b64decode(str) {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  str = String(str).replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+\/]/g, '');
+  var out = '', bits = 0, acc = 0;
+  for (var i = 0; i < str.length; i++) {
+    acc = ((acc << 6) | chars.indexOf(str.charAt(i))) & 0xffffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((acc >> bits) & 0xff);
+    }
+  }
+  return out;
+}
+
+function slugify(s) {
+  return String(s || '').toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/['\u2019`]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function hostOf(u) {
+  var m = /^(?:https?:)?\/\/(?:www\.)?([^\/?#:]+)/i.exec(String(u || ''));
+  return m ? m[1].toLowerCase() : '';
+}
+
+function originOf(u) {
+  var m = /^((?:https?:)?\/\/[^\/?#]+)/i.exec(String(u || ''));
+  return m ? m[1] : '';
+}
+
+function absUrl(u, base) {
+  u = decodeEntities(String(u || '')).trim();
+  if (!u) return '';
+  if (u.indexOf('//') === 0) return 'https:' + u;
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.charAt(0) === '/') return originOf(base) + u;
+  return '';
+}
+
+/* ───────────── Pencocokan judul ───────────── */
+var ROMAN = { ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8 };
+
+function norm(s) {
+  return String(s || '').toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/\b(?:subtitle|sub)\s+indo(?:nesia)?\b/g, ' ')
+    .replace(/\bdonghua\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// 0 = tidak ada penanda season di judul
+function seasonOf(title) {
+  var t = norm(title), m;
+  if ((m = /\bseason (\d+)\b/.exec(t)) || (m = /\b(\d+)(?:st|nd|rd|th) season\b/.exec(t))) return parseInt(m[1], 10);
+  if ((m = /\b(ii|iii|iv|v|vi|vii|viii)$/.exec(t))) return ROMAN[m[1]];
+  if ((m = /\b([2-9])$/.exec(t))) return parseInt(m[1], 10);
+  return 0;
+}
+
+function baseName(title) {
+  return norm(title)
+    .replace(/\bseason \d+\b/g, ' ')
+    .replace(/\b\d+(?:st|nd|rd|th) season\b/g, ' ')
+    .replace(/\b(?:ii|iii|iv|v|vi|vii|viii)$/, ' ')
+    .replace(/\b[2-9]$/, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+function similarity(a, b) {
+  var A = unique(baseName(a).split(' ')), B = unique(baseName(b).split(' '));
+  if (!A.length || !B.length) return 0;
+  var inB = {}, hit = 0, i;
+  for (i = 0; i < B.length; i++) inB[B[i]] = 1;
+  for (i = 0; i < A.length; i++) if (inB[A[i]]) hit++;
+  return (2 * hit) / (A.length + B.length);
+}
+
+function qnum(q) {
+  var m = /(\d+)/.exec(String(q || ''));
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/* ───────────── Promise & HTTP ───────────── */
+function withTimeout(p, ms, label) {
+  return new Promise(function (resolve, reject) {
+    var finished = false;
+    var timer = setTimeout(function () {
+      if (!finished) { finished = true; reject(new Error('timeout: ' + label)); }
+    }, ms);
+    p.then(function (v) {
+      if (!finished) { finished = true; clearTimeout(timer); resolve(v); }
+    }, function (e) {
+      if (!finished) { finished = true; clearTimeout(timer); reject(e); }
     });
+  });
 }
 
-// 2. EKSTRAKSI STREAM DARI HTML (Iframe, Select, Regex, AJAX)
-function extractStreams(html) {
-  var streams = [];
-  var seen = {};
-  
-  function add(url, name) {
-    if (!url || !/^https?:/.test(url)) return;
-    if (url.indexOf('anichin.moe') !== -1) return;
-    if (seen[url]) return;
-    seen[url] = true;
-    var server = name || '';
-    try { server = new URL(url).hostname.replace('www.', ''); } catch(e) {}
-    streams.push({ url: url, server: server });
+function hasItems(r) { return !!(r && r.length); }
+
+// Jalankan task satu per satu sampai ada yang menghasilkan sesuatu
+function runSeq(tasks, done) {
+  done = done || hasItems;
+  var i = 0;
+  function next() {
+    if (i >= tasks.length) return Promise.resolve(null);
+    var t = tasks[i++];
+    return new Promise(function (res) { res(t()); }).then(function (r) {
+      return done(r) ? r : next();
+    }, function () { return next(); });
+  }
+  return next();
+}
+
+function http(ctx, url, o) {
+  o = o || {};
+  var left = ctx.deadline - Date.now();
+  if (left < 1500) return Promise.reject(new Error('budget waktu habis'));
+  var headers = {
+    'User-Agent': UA,
+    'Accept': o.json ? 'application/json, text/plain, */*' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+  };
+  if (o.referer) headers['Referer'] = o.referer;
+  if (o.headers) { for (var k in o.headers) headers[k] = o.headers[k]; }
+  var p = fetch(url, { method: 'GET', headers: headers, redirect: 'follow' }).then(function (res) {
+    return res.text().then(function (text) {
+      return { status: res.status, url: res.url || url, text: text || '' };
+    });
+  });
+  return withTimeout(p, Math.min(REQ_TIMEOUT, left), url);
+}
+
+function blocked(r) {
+  if (r.status === 403 || r.status === 429 || r.status === 503) return true;
+  return r.text.length < 8000 && /just a moment|cf-browser-verification|challenge-platform|attention required/i.test(r.text);
+}
+
+// null jika diblokir Cloudflare / error HTTP
+function getHtml(ctx, url, referer) {
+  return http(ctx, url, { referer: referer }).then(function (r) {
+    if (blocked(r)) { log('diblokir (Cloudflare?)', r.status, url); return null; }
+    if (r.status >= 400) { log('HTTP', r.status, url); return null; }
+    return r;
+  }).catch(function (e) { log('gagal fetch', url, e && e.message); return null; });
+}
+
+function getJson(ctx, url, o) {
+  o = o || {};
+  o.json = true;
+  return http(ctx, url, o).then(function (r) {
+    if (r.status >= 400) return null;
+    try { return JSON.parse(r.text); } catch (e) { return null; }
+  }).catch(function () { return null; });
+}
+
+/* ───────────── TMDB ───────────── */
+function tmdb(ctx, path, params) {
+  if (!TMDB_KEY) return Promise.resolve(null);
+  var qs = 'api_key=' + encodeURIComponent(TMDB_KEY);
+  for (var k in (params || {})) qs += '&' + k + '=' + encodeURIComponent(params[k]);
+  return getJson(ctx, 'https://api.themoviedb.org/3' + path + '?' + qs);
+}
+
+function parseContentId(id) {
+  var s = String(id == null ? '' : id).trim(), m;
+  if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };
+  if ((m = /(tt\d+)/i.exec(s))) return { kind: 'imdb', id: m[1] };
+  if ((m = /^mal:(\d+)/i.exec(s))) return { kind: 'mal', id: m[1] };
+  if (/^\d+$/.test(s)) return { kind: 'tmdb', id: s };
+  return { kind: 'unknown', id: s };
+}
+
+function isLatin(t) {
+  return /[A-Za-z]/.test(t) && !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(t);
+}
+
+function resolveMeta(ctx, parsed) {
+  var kind = ctx.type, idP;
+  if (parsed.kind === 'tmdb') {
+    idP = Promise.resolve(parsed.id);
+  } else if (parsed.kind === 'imdb') {
+    idP = tmdb(ctx, '/find/' + parsed.id, { external_source: 'imdb_id' }).then(function (j) {
+      var arr = j && (kind === 'movie' ? j.movie_results : j.tv_results);
+      return arr && arr[0] ? String(arr[0].id) : null;
+    });
+  } else {
+    idP = Promise.resolve(null);
+  }
+  return idP.then(function (id) {
+    if (!id) return null;
+    return Promise.all([
+      tmdb(ctx, '/' + kind + '/' + id, { language: 'en-US' }),
+      tmdb(ctx, '/' + kind + '/' + id + '/alternative_titles', {})
+    ]).then(function (res) {
+      var d = res[0], alt = res[1];
+      if (!d) return null;
+      var list = [d.name || d.title, d.original_name || d.original_title];
+      var extra = (alt && (alt.results || alt.titles)) || [];
+      var i, titles = [];
+      for (i = 0; i < extra.length; i++) list.push(extra[i].title);
+      for (i = 0; i < list.length; i++) {
+        if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+      }
+      return { titles: unique(titles).slice(0, 5), seasons: d.seasons || [] };
+    });
+  });
+}
+
+// Nomor absolut untuk entri situs yang menggabungkan beberapa season
+function absoluteEpisode(seasons, season, episode) {
+  var total = 0;
+  for (var i = 0; i < (seasons || []).length; i++) {
+    var s = seasons[i];
+    if (s.season_number > 0 && s.season_number < season) total += s.episode_count || 0;
+  }
+  return total + episode;
+}
+
+/* ───────────── Parsing halaman situs (tema AnimeStream) ───────────── */
+// Kartu hasil pencarian / daftar: .listupd article.bs
+function parseCards(html, pageUrl) {
+  var $ = cheerio.load(html), out = [], seen = {};
+  $('article.bs, .listupd .bs').each(function () {
+    var box = $(this);
+    var a = box.find('a[href]').first();
+    var url = absUrl(a.attr('href'), pageUrl);
+    if (!url || seen[url]) return;
+    var title = a.attr('title') || box.find('h2').first().text() || box.find('.tt').first().text() || '';
+    title = decodeEntities(title).replace(/\s+/g, ' ').trim();
+    if (!title) return;
+    seen[url] = 1;
+    out.push({ url: url, title: title });
+  });
+  return out;
+}
+
+// Daftar episode di halaman series: .eplister li a
+function parseEpisodes(html, pageUrl) {
+  var $ = cheerio.load(html), out = [], seen = {};
+  function add(href, label) {
+    var url = absUrl(href, pageUrl);
+    if (!url || seen[url]) return;
+    var m = /(\d+(?:\.\d+)?)/.exec(String(label || '')) || /episode-0*(\d+)/i.exec(url);
+    seen[url] = 1;
+    out.push({ url: url, num: m ? parseFloat(m[1]) : null });
+  }
+  $('.eplister li a').each(function () {
+    var el = $(this);
+    add(el.attr('href'), el.find('.epl-num').first().text());
+  });
+  if (!out.length) {
+    $('a[href*="episode-"]').each(function () { add($(this).attr('href'), ''); });
+  }
+  return out;
+}
+
+function pickEpisode(list, nums, type) {
+  if (!list.length) return null;
+  if (type === 'movie') return list[list.length - 1].url; // situs mengurutkan terbaru di atas
+  for (var n = 0; n < nums.length; n++) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].num === nums[n]) return list[i].url;
+    }
+  }
+  return null;
+}
+
+function episodeMatches(url, nums) {
+  var m = /episode-0*(\d+)/i.exec(url || '');
+  if (!m) return true; // pola URL berbeda: jangan diblokir
+  var n = parseInt(m[1], 10);
+  for (var i = 0; i < nums.length; i++) if (nums[i] === n) return true;
+  return false;
+}
+
+function pageTitle(html) {
+  var m = /<h1[^>]*entry-title[^>]*>([\s\S]*?)<\/h1>/i.exec(html) || /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  return m ? decodeEntities(m[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : '';
+}
+
+function titleOk(ctx, html) {
+  if (ctx.type === 'movie') return true;
+  var t = pageTitle(html).replace(/\s*(?:episode|eps?)\s*\d+.*$/i, '').replace(/\s+[-\u2013|]\s+.*$/, '');
+  if (!norm(t)) return true;
+  var best = 0;
+  for (var i = 0; i < ctx.titles.length; i++) best = Math.max(best, similarity(t, ctx.titles[i]));
+  return best >= 0.5;
+}
+
+function rankCandidates(cands, titles, season) {
+  var out = [];
+  for (var i = 0; i < cands.length; i++) {
+    var c = cands[i];
+    if (/episode-\d+/i.test(c.url)) continue; // hanya halaman series
+    var best = 0;
+    for (var j = 0; j < titles.length; j++) best = Math.max(best, similarity(c.title, titles[j]));
+    var cs = seasonOf(c.title), score = best;
+    if (season > 1) {
+      if (cs === season) score += 0.25;
+      else if (cs && cs !== season) score -= 0.4;
+    } else if (cs > 1) {
+      score -= 0.4;
+    }
+    if (score >= 0.5) out.push({ url: c.url, title: c.title, score: score, season: cs });
+  }
+  out.sort(function (a, b) { return b.score - a.score; });
+  return out;
+}
+
+/* ───────────── Ekstrak server dari halaman episode ───────────── */
+// <select class="mirror"><option value="BASE64(<iframe src=...>)">Okru</option>...
+function extractServers(html, pageUrl) {
+  var servers = [], seen = {}, pageHost = hostOf(pageUrl);
+  var skip = /(^|\.)(googletagmanager|google-analytics|googlesyndication|doubleclick|facebook|histats|disqus|youtube|youtu)\./i;
+
+  function push(url, label) {
+    url = absUrl(url, pageUrl);
+    var host = hostOf(url);
+    if (!url || !host || host === pageHost || seen[url] || skip.test(host)) return;
+    seen[url] = 1;
+    servers.push({ url: url, label: String(label || host).replace(/\s+/g, ' ').trim() });
   }
 
-  // A. Cari <iframe>
-  var iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-  var match;
-  while ((match = iframeRegex.exec(html)) !== null) add(match[1]);
-
-  // B. Cari <select> option (server list) atau link video
-  var cheerio = require('cheerio-without-node-native');
-  var $ = cheerio.load(html);
-  
-  $('select option, .mirror li').each(function(i, el) {
-    var val = $(el).val() || $(el).attr('data-video') || $(el).attr('data-src') || $(el).attr('data-url');
-    var text = $(el).text().trim();
-    if (val && /^https?:/.test(val)) add(val, text);
-  });
-
-  // C. Regex untuk host streaming umum (Okru, Dailymotion, dll)
-  var hostRegex = /(https?:\/\/(?:[^"'\s<>\\]+\.)?(?:ok\.ru|dailymotion\.com|rumble\.com|odysee\.com|streamruby\.com|vidhide\.com|vidara\.to|d-tube\.net|vidsrc\.me|embed[^"'\s<>\\]+)\/[^"'\s<>\\]+)/gi;
-  while ((match = hostRegex.exec(html)) !== null) add(match[1]);
-
-  // D. Deteksi AJAX Player (jika stream dimuat lewat JS)
-  var ajaxUrl = null;
-  var postId = $('.player').attr('data-post') || $('[data-post]').attr('data-post');
-  if (postId) {
-    var nume = $('.player').attr('data-nume') || $('[data-nume]').attr('data-nume') || '1';
-    var type = $('.player').attr('data-type') || $('[data-type]').attr('data-type') || 'tv';
-    ajaxUrl = BASE_URL + '/wp-admin/admin-ajax.php?action=player_ajax&post=' + postId + '&nume=' + nume + '&type=' + type;
+  function fromSnippet(snippet, label) {
+    var s = String(snippet || '');
+    var m = /<iframe[^>]+?src\s*=\s*["']([^"']+)["']/i.exec(s) ||
+            /<(?:source|video)[^>]+?src\s*=\s*["']([^"']+)["']/i.exec(s);
+    if (m) { push(m[1], label); return; }
+    s = s.trim();
+    if (/^(?:https?:)?\/\//i.test(s)) push(s, label);
   }
 
-  return { streams: streams, ajaxUrl: ajaxUrl };
+  function fromValue(v, label) {
+    v = String(v || '').trim();
+    if (!v) return;
+    if (/^(?:https?:)?\/\//i.test(v)) { push(v, label); return; }
+    if (v.charAt(0) === '<') { fromSnippet(v, label); return; }
+    var dec = '';
+    try { dec = b64decode(v); } catch (e) {}
+    fromSnippet(dec, label);
+  }
+
+  // 1) dropdown server
+  var selRe = /<select\b[^>]*(?:class|name)\s*=\s*["'][^"']*mirror[^"']*["'][^>]*>([\s\S]*?)<\/select>/gi, sm;
+  while ((sm = selRe.exec(html))) {
+    var optRe = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi, om;
+    while ((om = optRe.exec(sm[1]))) {
+      var vm = /\bvalue\s*=\s*["']([^"']*)["']/i.exec(om[1]);
+      fromValue(vm ? vm[1] : '', decodeEntities(om[2].replace(/<[^>]+>/g, ' ')));
+    }
+  }
+
+  // 2) atribut data-* (tema lain)
+  if (!servers.length) {
+    var dRe = /\bdata-(?:embed|video|iframe)\s*=\s*["']([^"']+)["']/gi, dm;
+    while ((dm = dRe.exec(html))) fromValue(dm[1], '');
+  }
+
+  // 3) iframe default (hanya bila tidak ada server lain, supaya iklan tidak ikut)
+  if (!servers.length) {
+    var iRe = /<iframe\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi, im, n = 0;
+    while ((im = iRe.exec(html)) && n < 3) { push(im[1], 'Default'); n++; }
+  }
+  return servers;
 }
 
-// 3. CARI EPISODE DARI HALAMAN SERIES
-function findEpisodeUrl(seriesHtml, episodeNum) {
-  var cheerio = require('cheerio-without-node-native');
-  var $ = cheerio.load(seriesHtml);
-  var found = '';
+/* ───────────── Resolver embed -> URL langsung ───────────── */
+var OK_Q = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
 
-  $('a').each(function (i, el) {
-    if (found) return;
-    var href = $(el).attr('href');
-    if (!href || href.indexOf('-episode-') === -1) return;
-
-    var m = href.match(/-episode-(\d+)/i);
-    var num = m ? parseInt(m[1], 10) : null;
-
-    if (num === episodeNum) found = href;
-  });
-  return found;
+function okruStreams(meta) {
+  var out = [], hdr = { 'User-Agent': UA, 'Referer': 'https://ok.ru/' };
+  if (!meta) return out;
+  var hls = meta.hlsManifestUrl || meta.ondemandHls || meta.hlsMasterPlaylistUrl;
+  if (hls) out.push({ url: absUrl(hls, 'https://ok.ru'), quality: 'Auto', type: 'hls', headers: hdr });
+  var vids = meta.videos || [];
+  for (var i = 0; i < vids.length; i++) {
+    var q = OK_Q[vids[i].name];
+    if (!vids[i].url || (q && q < 360)) continue;
+    out.push({ url: absUrl(vids[i].url, 'https://ok.ru'), quality: q ? q + 'p' : 'HD', type: 'mp4', headers: hdr });
+  }
+  return out;
 }
 
-// 4. FUNGSI UTAMA
-function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
-  return new Promise(function (resolve) {
-    getTitleFromTmdb(tmdbId, mediaType)
-      .then(function (title) {
-        if (!title) return resolve([]);
-        
-        searchAnichin(title).then(function (slug) {
-          if (!slug) return resolve([]);
-
-          // Ambil halaman series untuk mencari link episode
-          var seriesUrl = BASE_URL + '/' + slug + '/';
-          
-          fetch(seriesUrl, { headers: WORKING_HEADERS })
-            .then(function(r) { return r.text(); })
-            .then(function(seriesHtml) {
-              var episodeUrl = findEpisodeUrl(seriesHtml, episodeNum);
-              
-              // Jika tidak ada link episode, berarti ini Movie, pakai URL series
-              var targetUrl = episodeUrl ? (episodeUrl.startsWith('http') ? episodeUrl : BASE_URL + episodeUrl) : seriesUrl;
-              
-              return fetch(targetUrl, { headers: WORKING_HEADERS })
-                .then(function(r) { return r.text(); })
-                .then(function(playerHtml) {
-                  var ext = extractStreams(playerHtml);
-                  
-                  if (ext.streams.length > 0) {
-                    return resolve(ext.streams.map(function(s, i) {
-                      return {
-                        name: 'Anichin - ' + (s.server || ('Server ' + (i + 1))),
-                        title: title + ' Episode ' + episodeNum,
-                        url: s.url,
-                        quality: '1080p',
-                        size: 'Unknown',
-                        headers: WORKING_HEADERS,
-                        provider: 'anichin-care'
-                      };
-                    }));
-                  }
-
-                  // Jika tidak ada stream tapi ada AJAX endpoint, panggil AJAX-nya
-                  if (ext.ajaxUrl) {
-                    fetch(ext.ajaxUrl, { headers: WORKING_HEADERS })
-                      .then(function(r) { return r.text(); })
-                      .then(function(ajaxHtml) {
-                        var ajaxExt = extractStreams(ajaxHtml);
-                        resolve(ajaxExt.streams.map(function(s, i) {
-                          return {
-                            name: 'Anichin - ' + (s.server || ('Server ' + (i + 1))),
-                            title: title + ' Episode ' + episodeNum,
-                            url: s.url,
-                            quality: '1080p',
-                            size: 'Unknown',
-                            headers: WORKING_HEADERS,
-                            provider: 'anichin-care'
-                          };
-                        }));
-                      });
-                  } else {
-                    resolve([]);
-                  }
-                });
-            })
-            .catch(function() { resolve([]); });
-        });
-      })
-      .catch(function () { resolve([]); });
+function resolveOkru(ctx, url) {
+  var m = /\/video(?:embed)?\/(\d+)/i.exec(url);
+  if (!m) return Promise.resolve([]);
+  var embed = 'https://ok.ru/videoembed/' + m[1];
+  return http(ctx, embed, { referer: ctx.base + '/' }).then(function (r) {
+    var mm = /data-options="([^"]+)"/.exec(r.text);
+    if (!mm) return [];
+    var opts;
+    try { opts = JSON.parse(decodeEntities(mm[1])); } catch (e) { return []; }
+    var fv = (opts && opts.flashvars) || {}, metaP;
+    if (fv.metadata) {
+      try { metaP = Promise.resolve(typeof fv.metadata === 'string' ? JSON.parse(fv.metadata) : fv.metadata); }
+      catch (e2) { metaP = Promise.resolve(null); }
+    } else if (fv.metadataUrl) {
+      metaP = getJson(ctx, absUrl(fv.metadataUrl, 'https://ok.ru'), { referer: embed });
+    } else {
+      metaP = Promise.resolve(null);
+    }
+    return metaP.then(okruStreams);
   });
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getStreams: getStreams };
-} else {
-  global.getStreams = getStreams;
+function resolveDailymotion(ctx, url) {
+  var m = /(?:\/video\/|[?&]video=|dai\.ly\/)([a-z0-9]+)/i.exec(url);
+  if (!m) return Promise.resolve([]);
+  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] + '?embedder=' + encodeURIComponent(ctx.base + '/');
+  return getJson(ctx, api, { referer: ctx.base + '/' }).then(function (j) {
+    var auto = j && j.qualities && j.qualities.auto && j.qualities.auto[0];
+    if (!auto || !auto.url) return [];
+    return [{ url: auto.url, quality: 'Auto', type: 'hls', headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' } }];
+  });
 }
+
+function resolveRumble(ctx, url) {
+  var m = /\/embed\/([a-z0-9]+)/i.exec(url);
+  if (!m) return Promise.resolve([]);
+  var api = 'https://rumble.com/embedJS/u3/?request=video&ver=2&v=' + m[1];
+  return getJson(ctx, api, { referer: 'https://rumble.com/' }).then(function (j) {
+    var out = [], ua = j && j.ua, hdr = { 'User-Agent': UA, 'Referer': 'https://rumble.com/' };
+    if (!ua) return out;
+    for (var fmt in ua) {
+      var group = ua[fmt];
+      for (var h in group) {
+        var item = group[h];
+        if (!item || !item.url) continue;
+        if (fmt === 'hls') out.push({ url: item.url, quality: 'Auto', type: 'hls', headers: hdr });
+        else if (fmt === 'mp4') out.push({ url: item.url, quality: /^\d+$/.test(h) ? h + 'p' : 'HD', type: 'mp4', headers: hdr });
+      }
+    }
+    return out;
+  });
+}
+
+// Host lain: cari m3u8/mp4 langsung di HTML embed
+function resolveGeneric(ctx, url) {
+  return http(ctx, url, { referer: ctx.base + '/' }).then(function (r) {
+    if (r.status >= 400) return [];
+    var t = r.text.replace(/\\\//g, '/');
+    var re = /https?:\/\/[^\s"'<>\\)]+?\.(m3u8|mp4)(?:\?[^\s"'<>\\)]*)?/gi, m, found = {}, out = [];
+    while ((m = re.exec(t))) {
+      if (found[m[0]]) continue;
+      found[m[0]] = 1;
+      out.push({
+        url: m[0], quality: 'Auto', type: m[1].toLowerCase() === 'm3u8' ? 'hls' : 'mp4',
+        headers: { 'User-Agent': UA, 'Referer': originOf(url) + '/' }
+      });
+    }
+    return out.slice(0, 3);
+  });
+}
+
+function resolveServer(ctx, srv) {
+  var u = srv.url, host = hostOf(u), p;
+  if (/\.m3u8(?:[?#]|$)/i.test(u)) p = Promise.resolve([{ url: u, quality: 'Auto', type: 'hls' }]);
+  else if (/\.mp4(?:[?#]|$)/i.test(u)) p = Promise.resolve([{ url: u, quality: 'Auto', type: 'mp4' }]);
+  else if (/(^|\.)ok\.ru$/.test(host)) p = resolveOkru(ctx, u);
+  else if (/(^|\.)(dailymotion\.com|dai\.ly)$/.test(host)) p = resolveDailymotion(ctx, u);
+  else if (/(^|\.)rumble\.com$/.test(host)) p = resolveRumble(ctx, u);
+  else if (/(^|\.)(odysee\.com|d\.tube)$/.test(host)) p = Promise.resolve([]); // belum didukung
+  else p = resolveGeneric(ctx, u);
+
+  return p.then(function (items) {
+    var label = srv.label || host;
+    var base = ctx.titles[0] + (ctx.type === 'tv' ? ' S' + pad2(ctx.season) + 'E' + pad2(ctx.episode) : '');
+    return items.map(function (it) {
+      return {
+        name: PROVIDER_NAME + ' - ' + label,
+        title: base + ' \u2022 Sub Indo',
+        url: it.url,
+ 
