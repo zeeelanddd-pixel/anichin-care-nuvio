@@ -1,19 +1,20 @@
 {
   "name": "Anichin Care",
-  "version": "0.1.1",
+  "version": "1.0.0",
+  "description": "Anichin Donghua & Anime Sub Indo",
+  "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin-care",
       "name": "Anichin Care",
-      "description": "Anichin Care provider untuk Nuvio",
-      "version": "0.1.1",
+      "description": "Streaming Donghua & Anime Sub Indo dari Anichin",
+      "version": "1.0.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": ["tv"],
       "filename": "providers/anichin-care.js",
       "enabled": true,
-      "limited": true,
-      "contentLanguage": ["id"],
-      "supportsExternalPlayer": true
+      "formats": ["m3u8", "mp4"],
+      "contentLanguage": ["id"]
     }
   ]
 }
