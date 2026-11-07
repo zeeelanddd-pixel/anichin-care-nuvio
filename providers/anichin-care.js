@@ -16,6 +16,7 @@
 /* ---------------- Konfigurasi ---------------- */
 var PROVIDER_ID = 'anichin-care';
 var PROVIDER_NAME = 'Anichin';
+var PROVIDER_VERSION = '0.8';
 var BASES = ['https://anichin.moe']; // tambahkan domain cadangan bila situs pindah
 // Nuvio umumnya menyuntikkan TMDB_API_KEY. Jika tidak ada, pakai key cadangan.
 var TMDB_KEY = (typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? TMDB_API_KEY : '1865f43a0549ca50d341dd9ab8b29f49';
@@ -365,15 +366,22 @@ function parseCards(html, pageUrl) {
   return out;
 }
 
-// Daftar episode: semua anchor yang mengandung 'episode-N' di href
+// Deteksi episode dari pola URL umum dan nomor pada teks anchor.
 function parseEpisodes(html, pageUrl) {
   var out = [], seen = {};
-  var re = /<a\b[^>]*href="([^"]*episode-0*(\d+(?:\.\d+)?)[^"]*)"[^>]*>/gi, m;
-  while ((m = re.exec(html))) {
-    var url = absUrl(m[1], pageUrl);
+  var re = /<a\\b([^>]*?)href=["']([^"']+)["']([^>]*)>([\\s\\S]*?)<\\/a>/gi, m;
+  while ((m = re.exec(String(html || '')))) {
+    var rawUrl = decodeEntities(m[2]);
+    var attrs = m[1] + ' ' + m[3];
+    var label = decodeEntities(String(m[4] || '').replace(/<[^>]+>/g, ' ')).replace(/\\s+/g, ' ').trim();
+    var hit = /(?:episode|episodes|ep|eps)[-_/ .#]*0*(\\d+(?:\\.\\d+)?)/i.exec(rawUrl)
+      || /(?:^|[\\s[(])(?:episode|ep|eps?)\\s*0*(\\d+(?:\\.\\d+)?)(?:$|[\\s)\\].:-])/i.exec(label)
+      || /data-(?:episode|ep|num)=["']?0*(\\d+(?:\\.\\d+)?)/i.exec(attrs);
+    if (!hit) continue;
+    var url = absUrl(rawUrl, pageUrl);
     if (!url || seen[url]) continue;
     seen[url] = 1;
-    out.push({ url: url, num: parseFloat(m[2]) });
+    out.push({ url: url, num: parseFloat(hit[1]) });
   }
   return out;
 }
@@ -425,7 +433,7 @@ function rankCandidates(cands, titles, season) {
     } else if (cs > 1) {
       score -= 0.4;
     }
-    if (score >= 0.5) out.push({ url: c.url, title: c.title, score: score, season: cs });
+    if (score >= 0.4) out.push({ url: c.url, title: c.title, score: score, season: cs });
   }
   out.sort(function (a, b) { return b.score - a.score; });
   return out;
@@ -899,7 +907,7 @@ function getStreams(tmdbId,mediaType,season,episode){
     })(queries[i]);
     return runAll(tasks).then(function(cards){
       var ranked=rankCandidates(cards||[],ctx.titles,s),candidateTasks=[];
-      for(var c=0;c<Math.min(ranked.length,4);c++)(function(candidate){
+      for(var c=0;c<Math.min(ranked.length,6);c++)(function(candidate){
         candidateTasks.push(function(){return getHtml(ctx,candidate.url,ctx.base+'/').then(function(page){
           if(!page||!titleOk(ctx,page.text))return [];
           var pageUrl=page.url||candidate.url,episodeUrl=pageUrl;
