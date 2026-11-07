@@ -369,14 +369,14 @@ function parseCards(html, pageUrl) {
 // Deteksi episode dari pola URL umum dan nomor pada teks anchor.
 function parseEpisodes(html, pageUrl) {
   var out = [], seen = {};
-  var re = /<a\\b([^>]*?)href=["']([^"']+)["']([^>]*)>([\\s\\S]*?)<\\/a>/gi, m;
+  var re = /<a\b([^>]*?)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi, m;
   while ((m = re.exec(String(html || '')))) {
     var rawUrl = decodeEntities(m[2]);
     var attrs = m[1] + ' ' + m[3];
-    var label = decodeEntities(String(m[4] || '').replace(/<[^>]+>/g, ' ')).replace(/\\s+/g, ' ').trim();
-    var hit = /(?:episode|episodes|ep|eps)[-_/ .#]*0*(\\d+(?:\\.\\d+)?)/i.exec(rawUrl)
-      || /(?:^|[\\s[(])(?:episode|ep|eps?)\\s*0*(\\d+(?:\\.\\d+)?)(?:$|[\\s)\\].:-])/i.exec(label)
-      || /data-(?:episode|ep|num)=["']?0*(\\d+(?:\\.\\d+)?)/i.exec(attrs);
+    var label = decodeEntities(String(m[4] || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    var hit = /(?:episode|episodes|ep|eps)[-_/ .#]*0*(\d+(?:\.\d+)?)/i.exec(rawUrl)
+      || /(?:^|[\s[(])(?:episode|ep|eps?)\s*0*(\d+(?:\.\d+)?)(?:$|[\s)\].:-])/i.exec(label)
+      || /data-(?:episode|ep|num)=["']?0*(\d+(?:\.\d+)?)/i.exec(attrs);
     if (!hit) continue;
     var url = absUrl(rawUrl, pageUrl);
     if (!url || seen[url]) continue;
