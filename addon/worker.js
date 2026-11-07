@@ -130,36 +130,100 @@ async function searchKitsu(term, subtype, offset) {
   return kitsuRequest("/anime?" + params.toString());
 }
 
+async function bangumiRequest(path, body) {
+  const response = await fetch(BANGUMI_API + path, {
+    method: body ? "POST" : "GET",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "user-agent": "DonghuaCatalog/0.7.0 (github.com/zeeelanddd-pixel/anichin-care-nuvio)"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); }
+  catch { throw new Error("Bangumi returned unreadable JSON (HTTP " + response.status + ")"); }
+  if (!response.ok) throw new Error("Bangumi returned HTTP " + response.status);
+  return payload;
+}
+
+async function searchBangumi(term) {
+  return bangumiRequest("/search/subjects?limit=20&offset=0", {
+    keyword: term,
+    sort: "heat",
+    filter: { type: [2], nsfw: false }
+  });
+}
+
+function bangumiItemType(item) {
+  const value = String(item.platform || "") + " " + String(item.name_cn || item.name || "");
+  return /movie|film|剧场版|电影|劇場/i.test(value) ? "movie" : "series";
+}
+
+function bangumiPoster(item) {
+  const images = item.images || {};
+  return images.large || images.medium || images.common || images.small || null;
+}
+
+function toBangumiPreview(item) {
+  const year = item.date ? String(item.date).slice(0, 4) : "";
+  const episodes = item.eps || item.total_episodes || "";
+  return {
+    id: "bangumi:" + item.id,
+    type: bangumiItemType(item),
+    name: item.name_cn || item.name || "Untitled",
+    poster: bangumiPoster(item),
+    posterShape: "poster",
+    description: [year, item.platform || "", episodes ? episodes + " episodes" : "", item.score ? "rating " + item.score : ""].filter(Boolean).join(" • ") || "Metadata from Bangumi."
+  };
+}
+
+function normalizedTitle(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function getCatalog(type, params) {
   const search = (params.get("search") || "").trim();
   const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
   const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
-  // Default catalog searches several well-known donghua names in parallel.
-  // A user-entered search remains an exact single-query search.
-  const terms = search ? [search] : DEFAULT_SEARCH_TERMS;
-  const results = await Promise.all(
-    terms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))
-  );
-  const collected = new Map();
-
-  for (const result of results) {
+  const kitsuTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
+  const bangumiTerms = search ? [search] : ["国创", "国漫", "国产动画", "中国动画", "中国动画电影", "斗罗大陆", "斗破苍穹", "凡人修仙传"];
+  const pair = await Promise.all([
+    Promise.all(kitsuTerms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))),
+    Promise.all(bangumiTerms.map((term) => searchBangumi(term).catch(() => ({ data: [] }))))
+  ]);
+  const kitsuMap = new Map();
+  for (const result of pair[0]) {
+    for (const item of (result.data || [])) if (!kitsuMap.has(String(item.id))) kitsuMap.set(String(item.id), item);
+  }
+  const bangumiMap = new Map();
+  for (const result of pair[1]) {
     for (const item of (result.data || [])) {
-      if (EXCLUDED_IDS.has(String(item.id))) continue;
-      if (!collected.has(item.id)) collected.set(item.id, item);
+      if (!item || !item.id || bangumiItemType(item) !== type) continue;
+      if (!bangumiMap.has(String(item.id))) bangumiMap.set(String(item.id), item);
     }
   }
-
-  // Merge by popularity so results from different search terms have a
-  // consistent order. Apply skip after merging to keep global pagination.
-  const items = [...collected.values()].sort((a, b) =>
-    Number(b.attributes?.userCount || 0) - Number(a.attributes?.userCount || 0)
-  );
-
-  return {
-    metas: items.slice(skip, skip + PAGE_SIZE).map((item) => toMetaPreview(item, type))
-  };
+  const kitsuItems = Array.from(kitsuMap.values()).sort((a, b) => Number(b.attributes?.userCount || 0) - Number(a.attributes?.userCount || 0));
+  const bangumiItems = Array.from(bangumiMap.values()).sort((a, b) => Number(b.collection?.collect || b.collection_total || 0) - Number(a.collection?.collect || a.collection_total || 0));
+  const merged = [];
+  const seen = new Set();
+  const max = Math.max(kitsuItems.length, bangumiItems.length);
+  for (let i = 0; i < max; i++) {
+    const candidates = [kitsuItems[i], bangumiItems[i]];
+    for (const item of candidates) {
+      if (!item) continue;
+      const isKitsu = !!item.attributes;
+      const title = isKitsu ? titleOf(item.attributes) : (item.name_cn || item.name);
+      const year = isKitsu ? String(item.attributes.startDate || "").slice(0, 4) : String(item.date || "").slice(0, 4);
+      const key = normalizedTitle(title) + "|" + year + "|" + type;
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(isKitsu ? toMetaPreview(item, type) : toBangumiPreview(item));
+    }
+  }
+  return { metas: merged.slice(skip, skip + PAGE_SIZE) };
 }
-
 async function getMeta(type, rawId) {
   const id = rawId.replace(/^kitsu:/, "");
   if (!/^\d+$/.test(id)) return { meta: null };
