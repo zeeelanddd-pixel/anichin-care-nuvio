@@ -520,4 +520,45 @@ function resolveServer(ctx, srv) {
     var base = t0;
     if (ctx.type === 'tv' && ctx.season > 0) base += ' S' + pad2(ctx.season) + 'E' + pad2(ctx.episode);
     var out = [];
-    for (var i = 0; i < (it
+    for (var i = 0; i < (items || []).length; i++) {
+      var item = items[i] || {};
+      if (!item.url) continue;
+      out.push({url:item.url,name:base+' - '+label+(item.quality?' ('+item.quality+')':''),title:base,quality:item.quality||'Auto',type:item.type||(/\.m3u8(?:[?#]|$)/i.test(item.url)?'hls':'mp4'),headers:item.headers||{'User-Agent':UA,'Referer':originOf(u)+'/' }});
+    }
+    return out;
+  }).catch(function(){return [];});
+}
+function getStreams(tmdbId,mediaType,season,episode){
+  var type=String(mediaType||'').toLowerCase()==='movie'?'movie':'tv';
+  var s=parseInt(season,10)||1,e=parseInt(episode,10)||1;
+  var ctx={base:BASES[0],type:type,season:s,episode:e,titles:[],deadline:Date.now()+TOTAL_BUDGET};
+  return resolveMeta(ctx,parseContentId(tmdbId)).then(function(meta){
+    if(!meta||!meta.titles||!meta.titles.length)return [];
+    ctx.titles=meta.titles;
+    var queries=unique(meta.titles.map(function(t){return slugify(t);}).filter(function(x){return !!x;})),tasks=[];
+    for(var i=0;i<queries.length;i++)(function(q){
+      tasks.push(function(){var url=ctx.base+'/?s='+encodeURIComponent(q.replace(/-/g,' '));return getHtml(ctx,url,ctx.base+'/').then(function(r){return r?parseCards(r.text,r.url||url):[];});});
+      tasks.push(function(){var url=ctx.base+'/wp-json/wp/v2/search?search='+encodeURIComponent(q.replace(/-/g,' '))+'&per_page=10';return getJson(ctx,url,{referer:ctx.base+'/'}).then(function(j){var a=[];if(j&&j.length)for(var k=0;k<j.length;k++)if(j[k]&&j[k].url&&j[k].title&&j[k].title.rendered)a.push({url:j[k].url,title:decodeEntities(j[k].title.rendered.replace(/<[^>]+>/g,' '))});return a;});});
+    })(queries[i]);
+    return runSeq(tasks,function(v){return !!(v&&v.length);}).then(function(cards){
+      var ranked=rankCandidates(cards||[],ctx.titles,s),candidateTasks=[];
+      for(var c=0;c<Math.min(ranked.length,4);c++)(function(candidate){
+        candidateTasks.push(function(){return getHtml(ctx,candidate.url,ctx.base+'/').then(function(page){
+          if(!page||!titleOk(ctx,page.text))return [];
+          var pageUrl=page.url||candidate.url,episodeUrl=pageUrl;
+          if(type==='tv'){var nums=[e],abs=absoluteEpisode(meta.seasons,s,e);if(abs!==e)nums.push(abs);var picked=pickEpisode(parseEpisodes(page.text,pageUrl),nums,type);if(picked)episodeUrl=picked;else if(!episodeMatches(pageUrl,nums))return [];}
+          else episodeUrl=pickEpisode(parseEpisodes(page.text,pageUrl),[],'movie')||pageUrl;
+          return getHtml(ctx,episodeUrl,pageUrl).then(function(epPage){
+            if(!epPage)return [];
+            var servers=extractServers(epPage.text,epPage.url||episodeUrl),serverTasks=[];
+            for(var z=0;z<servers.length;z++)(function(server){serverTasks.push(function(){return resolveServer(ctx,server);});})(servers[z]);
+            return runSeq(serverTasks,function(v){return !!(v&&v.length);}).then(function(v){return v||[];});
+          });
+        });});
+      })(ranked[c]);
+      return runSeq(candidateTasks,function(v){return !!(v&&v.length);}).then(function(v){return v||[];});
+    });
+  }).catch(function(err){log('getStreams error',err&&err.message);return [];});
+}
+if(typeof module!=='undefined'&&module.exports)module.exports={getStreams:getStreams};
+else if(typeof exports!=='undefined')exports.getStreams=getStreams;
