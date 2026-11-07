@@ -1,6 +1,6 @@
 {
   "name": "Anichin Care",
-  "version": "0.8",
+  "version": "0.9",
   "description": "Anichin Donghua & Anime Sub Indo",
   "author": "zeeelanddd-pixel",
   "scrapers": [
@@ -8,7 +8,7 @@
       "id": "anichin-care",
       "name": "Anichin Care",
       "description": "Streaming Donghua & Anime Sub Indo dari Anichin",
-      "version": "0.8",
+      "version": "0.9",
       "author": "zeeelanddd-pixel",
       "supportedTypes": ["movie", "tv"],
       "filename": "providers/anichin-care.js",
