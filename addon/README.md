@@ -2,7 +2,7 @@
 
 Addon katalog komunitas untuk Nuvio yang menggabungkan metadata anime/donghua dari **Kitsu** dan **Bangumi** melalui protokol Stremio.
 
-## Status versi 1.0.0
+## Status versi 1.1.0
 
 Addon ini menyediakan **katalog dan metadata**, bukan video atau layanan streaming.
 
@@ -12,8 +12,8 @@ Addon ini menyediakan **katalog dan metadata**, bukan video atau layanan streami
 - Pencarian judul melalui parameter `search`.
 - Pagination melalui parameter `skip`.
 - Dedup dasar lintas sumber berdasarkan judul, tahun, dan tipe.
-- ID metadata menggunakan prefix `kitsu:` dan `bangumi:`.
-- Timeout permintaan sumber untuk menghindari request menggantung.\n- Maksimal 45 permintaan sumber pada katalog default, dengan ruang untuk redirect agar tetap di bawah batas subrequest paket Cloudflare Free.
+- ID metadata menggunakan prefix `kitsu:` dan `bangumi:`.\n- Kata kunci pencarian dan judul yang ditampilkan diprioritaskan dalam huruf Latin; judul non-Latin tanpa alternatif Latin tidak ditampilkan.\n- Provider Anichin menerima ID `kitsu:` dan `bangumi:` lalu mengambil judul Latin dari API metadata untuk pencarian situs.
+- Timeout permintaan sumber untuk menghindari request menggantung.\n- Pencarian default memakai 24 kata kunci Latin dan maksimal 48 permintaan sumber (24 Kitsu + 24 Bangumi), sebelum redirect.
 
 Cakupan katalog bergantung pada data publik kedua layanan. Tidak ada jaminan semua donghua pernah terindeks atau selalu muncul. Judul anime Jepang dan animasi Korea dapat ikut muncul karena filter sumber tidak selalu dapat membedakan asal produksi secara sempurna.
 
