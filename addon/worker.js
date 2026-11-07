@@ -15,13 +15,11 @@ const DEFAULT_SEARCH_TERMS = [
   "Tunshi Xingkong", "Renegade Immortal", "Xian Ni", "A Will Eternal",
   "Yi Nian Yong Heng", "The King's Avatar", "Quanzhi Gaoshou",
   "Fog Hill of Five Elements", "Wu Shan Wu Xing", "The Westward",
-  "Xi Xing Ji", "Spirit Cage", "Ling Long", "Link Click",
-  "Shiguang Dailiren", "Heaven Official's Blessing", "Tian Guan Ci Fu",
-  "Grandmaster of Demonic Cultivation", "Mo Dao Zu Shi", "The Daily Life of the Immortal King",
-  "Xian Wang de Richang Shenghuo", "Scissor Seven", "Cike Wu Liuqi",
+  "Link Click", "Shiguang Dailiren", "Heaven Official's Blessing",
+  "Tian Guan Ci Fu", "Grandmaster of Demonic Cultivation", "Mo Dao Zu Shi",
+  "Spirit Cage", "Ling Long", "Scissor Seven", "Cike Wu Liuqi",
   "The Legend of Hei", "Luo Xiaohei Zhanji", "Nezha", "White Snake",
-  "New Gods Nezha Reborn", "Chang An San Wan Li", "Deep Sea",
-  "The Girl Downstairs", "Rakshasa Street", "Zhen Hun Jie"
+  "New Gods Nezha Reborn", "Deep Sea", "Chang An San Wan Li"
 ];
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
@@ -31,7 +29,7 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "Donghua Catalog",
   description: "Katalog multi-sumber Katalog donghua multi-sumber dari Kitsu dan Bangumi, mencakup serial, ONA, OVA, special, dan film. Metadata saja, tanpa streaming.",
   resources: ["catalog", "meta"],
@@ -68,7 +66,7 @@ async function kitsuRequest(path) {
     signal: controller.signal,
     headers: {
       "accept": "application/vnd.api+json",
-      "user-agent": "Nuvio-Donghua-Catalog/1.0.0"
+      "user-agent": "Nuvio-Donghua-Catalog/1.1.0"
     }
     });
   } finally {
