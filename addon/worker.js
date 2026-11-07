@@ -18,18 +18,11 @@ const DEFAULT_SEARCH_TERMS = [
   "A Will Eternal",
   "The Kings Avatar",
   "Fog Hill of Five Elements",
-  "The Westward"
+  "The Westward",
+  "斗破苍穹", "斗罗大陆", "完美世界", "吞噬星空", "凡人修仙传",
+  "仙逆", "一念永恒", "雾山五行", "西行纪", "灵笼", "眷思量",
+  "天官赐福", "魔道祖师", "全职高手", "时光代理人"
 ];
-// Exclude known false positives returned by Kitsu text search.
-const EXCLUDED_IDS = new Set([
-  "49575", // Pokemon Animated Pokedex: Eevee
-  "49576", // Pokemon Animated Pokedex: Resting on the Island
-  "7171",  // Taekwon Dongja Maruchi Arachi (Korean animation)
-  "43160", // The Haunted House: The Secret of the Cave (Korean animation)
-  "48862", // Honkai: Star Rail promotional animation
-  "51099", // Honkai Impact 3rd promotional animation
-  "51103"  // Honkai: Star Rail promotional animation
-]);
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
   { type: "series", id: "donghua-series", name: "Donghua Series" },
@@ -225,6 +218,29 @@ async function getCatalog(type, params) {
   return { metas: merged.slice(skip, skip + PAGE_SIZE) };
 }
 async function getMeta(type, rawId) {
+  if (rawId.indexOf("bangumi:") === 0) {
+    const id = rawId.replace(/^bangumi:/, "");
+    if (!/^\\d+$/.test(id)) return { meta: null };
+    const payload = await bangumiRequest("/subjects/" + encodeURIComponent(id));
+    const item = payload.data || payload;
+    if (!item || !item.id) return { meta: null };
+    const details = [
+      item.summary || "",
+      item.date ? "Release date: " + item.date : "",
+      item.platform ? "Format: " + item.platform : "",
+      item.eps ? "Episodes: " + item.eps : "",
+      item.score ? "Rating: " + item.score : ""
+    ].filter(Boolean).join("\\n\\n");
+    return { meta: {
+      id: "bangumi:" + item.id,
+      type: bangumiItemType(item),
+      name: item.name_cn || item.name || "Untitled",
+      poster: bangumiPoster(item),
+      posterShape: "poster",
+      description: details,
+      links: [{ name: "Bangumi", category: "Source", url: "https://bgm.tv/subject/" + item.id }]
+    } };
+  }
   const id = rawId.replace(/^kitsu:/, "");
   if (!/^\d+$/.test(id)) return { meta: null };
 
