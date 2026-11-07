@@ -83,6 +83,19 @@ test("movie catalog keeps movie entries only", async () => {
   }
 });
 
+test("Bangumi movie search is classified into the movie catalog", async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  try {
+    const response = await worker.fetch(new Request("https://addon.test/catalog/movie/donghua-movies.json?search=%E7%94%B5%E5%BD%B1%E6%B5%8B%E8%AF%95"));
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.ok(payload.metas.some(x => x.id === "bangumi:2002" && x.type === "movie"));
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
 test("Bangumi metadata route returns a detailed meta object", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = mockFetch;
