@@ -167,6 +167,22 @@ function runSeq(tasks, done) {
   return next();
 }
 
+function runAll(tasks) {
+  var pending = [];
+  for (var i = 0; i < tasks.length; i++) (function (task) {
+    pending.push(new Promise(function (resolve) {
+      try { resolve(task()); } catch (e) { resolve([]); }
+    }).then(function (v) { return v || []; }, function () { return []; }));
+  })(tasks[i]);
+  return Promise.all(pending).then(function (parts) {
+    var out = [];
+    for (var j = 0; j < parts.length; j++) {
+      if (parts[j] && parts[j].length) out = out.concat(parts[j]);
+    }
+    return out;
+  });
+}
+
 function http(ctx, url, o) {
   o = o || {};
   var left = ctx.deadline - Date.now();
@@ -184,6 +200,41 @@ function http(ctx, url, o) {
     });
   });
   return withTimeout(p, Math.min(REQ_TIMEOUT, left), url);
+}
+
+function postText(ctx, url, body, o) {
+  o = o || {};
+  var left = ctx.deadline - Date.now();
+  if (left < 1500) return Promise.reject(new Error('budget waktu habis'));
+  var headers = {
+    'User-Agent': UA,
+    'Accept': o.json ? 'application/json, text/plain, */*' : 'text/plain, */*',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Content-Type': o.contentType || 'application/json'
+  };
+  if (o.referer) headers['Referer'] = o.referer;
+  if (o.headers) { for (var k in o.headers) headers[k] = o.headers[k]; }
+  var p = fetch(url, {
+    method: 'POST',
+    headers: headers,
+    body: body,
+    redirect: 'follow'
+  }).then(function (res) {
+    return res.text().then(function (text) {
+      return { status: res.status, url: res.url || url, text: text || '' };
+    });
+  });
+  return withTimeout(p, Math.min(REQ_TIMEOUT, left), url);
+}
+
+function postJson(ctx, url, data, o) {
+  o = o || {};
+  o.contentType = 'application/json';
+  o.json = true;
+  return postText(ctx, url, JSON.stringify(data), o).then(function (r) {
+    if (!r || r.status >= 400) return null;
+    try { return JSON.parse(r.text); } catch (e) { return null; }
+  }).catch(function () { return null; });
 }
 
 function blocked(r) {
@@ -458,11 +509,28 @@ function resolveOkru(ctx, url) {
 function resolveDailymotion(ctx, url) {
   var m = /(?:\/video\/|[?&]video=|dai\.ly\/)([a-z0-9]+)/i.exec(url);
   if (!m) return Promise.resolve([]);
-  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] + '?embedder=' + encodeURIComponent(ctx.base + '/');
+  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] +
+    '?embedder=' + encodeURIComponent(ctx.base + '/');
   return getJson(ctx, api, { referer: ctx.base + '/' }).then(function (j) {
-    var auto = j && j.qualities && j.qualities.auto && j.qualities.auto[0];
-    if (!auto || !auto.url) return [];
-    return [{ url: auto.url, quality: 'Auto', type: 'hls', headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' } }];
+    var qualities = j && j.qualities, out = [], seen = {};
+    if (!qualities) return out;
+    var order = ['auto', '1080', '720', '576', '480', '380', '240'];
+    for (var i = 0; i < order.length; i++) {
+      var key = order[i], list = qualities[key];
+      if (!list || !list.length) continue;
+      for (var k = 0; k < list.length; k++) {
+        var item = list[k], u = item && item.url;
+        if (!u || seen[u]) continue;
+        seen[u] = 1;
+        out.push({
+          url: u,
+          quality: key === 'auto' ? 'Auto' : key + 'p',
+          type: /\.mp4(?:[?#]|$)/i.test(u) ? 'mp4' : 'hls',
+          headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' }
+        });
+      }
+    }
+    return out;
   });
 }
 
@@ -486,33 +554,290 @@ function resolveRumble(ctx, url) {
   });
 }
 
-// Host lain: cari m3u8/mp4 langsung di HTML embed
+// Cari URL media di HTML/JavaScript, termasuk URL relatif yang dipakai player.
+function scanVideoUrls(text, base) {
+  var t = String(text || '')
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/&amp;/g, '&');
+  var re = /((?:https?:)?\/\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?|\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?)/gi;
+  var out = [], seen = {}, m;
+  while ((m = re.exec(t))) {
+    var u = absUrl(m[1], base);
+    if (!u || seen[u]) continue;
+    seen[u] = 1;
+    out.push({
+      url: u,
+      quality: 'Auto',
+      type: /\.m3u8(?:[?#]|$)/i.test(u) ? 'hls' : 'mp4'
+    });
+  }
+  return out;
+}
+
+function radixToken(n, radix) {
+  var chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  var out = '';
+  do {
+    out = chars.charAt(n % radix) + out;
+    n = Math.floor(n / radix);
+  } while (n > 0);
+  return out;
+}
+
+// Unpacker ringan untuk format Dean Edwards p.a.c.k.e.r yang dipakai beberapa host.
+function unpackPacker(text) {
+  var re = /}\('((?:\\.|[^'])*)',\s*(\d+),\s*(\d+),\s*'((?:\\.|[^'])*)'\.split\('\|'\)/;
+  var m = re.exec(String(text || ''));
+  if (!m) return '';
+  var payload = m[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+  var radix = parseInt(m[2], 10);
+  var count = parseInt(m[3], 10);
+  var words = m[4].split('|');
+  if (!radix || radix < 2 || radix > 62 || count > 5000) return '';
+  for (var i = count - 1; i >= 0; i--) {
+    if (!words[i]) continue;
+    var token = radixToken(i, radix);
+    payload = payload.replace(new RegExp('\\b' + token + '\\b', 'g'), words[i]);
+  }
+  return payload;
+}
+
+function resolveVidara(ctx, url) {
+  var file = /\/(?:e|v|d)\/([a-z0-9]+)/i.exec(url);
+  if (!file) {
+    var parts = url.split('?')[0].split('/');
+    file = [null, parts[parts.length - 1]];
+  }
+  var code = file && file[1];
+  if (!code) return Promise.resolve([]);
+  return postJson(ctx, originOf(url) + '/api/stream', {
+    filecode: code,
+    device: 'web',
+    codecs: []
+  }, { referer: url }).then(function (j) {
+    if (!j || !j.streaming_url) return [];
+    return [{
+      url: absUrl(j.streaming_url, url),
+      quality: 'Auto',
+      type: /\.m3u8(?:[?#]|$)/i.test(j.streaming_url) ? 'hls' : 'mp4',
+      headers: { 'User-Agent': UA, 'Referer': url, 'Origin': originOf(url) }
+    }];
+  });
+}
+
+function resolveStreamruby(ctx, url) {
+  var m = /embed-([a-z0-9]+)\.html/i.exec(url) ||
+          /\/(?:e|v)\/([a-z0-9]+)/i.exec(url);
+  if (!m) return Promise.resolve([]);
+  var body = 'op=embed&file_code=' + encodeURIComponent(m[1]) + '&auto=1';
+  return postText(ctx, originOf(url) + '/dl', body, {
+    referer: url,
+    contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
+    headers: { 'Origin': originOf(url) }
+  }).then(function (r) {
+    if (!r || r.status >= 400) return [];
+    var candidates = [r.text, unpackPacker(r.text)];
+    var out = [], seen = {};
+    for (var i = 0; i < candidates.length; i++) {
+      var items = scanVideoUrls(candidates[i], url);
+      for (var k = 0; k < items.length; k++) {
+        if (!seen[items[k].url]) {
+          seen[items[k].url] = 1;
+          items[k].headers = { 'User-Agent': UA, 'Referer': url };
+          out.push(items[k]);
+        }
+      }
+    }
+    return out;
+  }).catch(function () { return []; });
+}
+
+function resolveVidHide(ctx, url) {
+  return getHtml(ctx, url, ctx.base + '/').then(function (r) {
+    if (!r) return [];
+    var sources = [r.text], scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi, sm;
+    while ((sm = scriptRe.exec(r.text))) {
+      if (sm[1] && sm[1].indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
+        var unpacked = unpackPacker(sm[1]);
+        if (unpacked) sources.push(unpacked);
+      }
+    }
+    var out = [], seen = {};
+    for (var i = 0; i < sources.length; i++) {
+      var items = scanVideoUrls(sources[i], r.url || url);
+      for (var k = 0; k < items.length; k++) {
+        if (!seen[items[k].url]) {
+          seen[items[k].url] = 1;
+          items[k].headers = {
+            'User-Agent': UA,
+            'Referer': url,
+            'Origin': originOf(url)
+          };
+          out.push(items[k]);
+        }
+      }
+    }
+    return out.slice(0, 5);
+  }).catch(function () { return []; });
+}
+
+function resolveOdysee(ctx, url) {
+  var p = /odysee\.com\/(.+?)(?:[?#]|$)/i.exec(url);
+  if (!p) return Promise.resolve([]);
+  var path = decodeEntities(p[1]).replace(/^\/+|\/+$/g, '');
+  path = path.replace(/^\$\/embed\//, '').replace(/^\$\/.*?\/embed\//, '');
+  if (!path || path.charAt(0) === '$') return resolveGeneric(ctx, url);
+  var lbryUri = 'lbry://' + path;
+  return postJson(ctx, 'https://api.na-backend.odysee.com/api/v1/proxy?m=resolve', {
+    jsonrpc: '2.0',
+    method: 'resolve',
+    params: { urls: [lbryUri] }
+  }, { referer: 'https://odysee.com/' }).then(function (j) {
+    var result = j && j.result, claim = null;
+    if (result) {
+      if (Object.prototype.toString.call(result) === '[object Array]') claim = result[0];
+      else {
+        var keys = Object.keys(result);
+        if (keys.length) claim = result[keys[0]];
+      }
+    }
+    var source = claim && claim.value && claim.value.source;
+    var sd = source && source.sd_hash;
+    if (!claim || !claim.claim_id || !claim.name || !sd) return resolveGeneric(ctx, url);
+    var streamUrl = 'https://player.odycdn.com/api/v3/streams/free/' +
+      encodeURIComponent(claim.name) + '/' + claim.claim_id + '/' +
+      String(sd).substring(0, 6) + '.mp4';
+    return [{
+      url: streamUrl,
+      quality: (claim.value && claim.value.video && claim.value.video.height ?
+        String(claim.value.video.height) + 'p' : 'Auto'),
+      type: 'mp4',
+      headers: { 'User-Agent': UA, 'Referer': 'https://odysee.com/', 'Origin': 'https://odysee.com' }
+    }];
+  }).catch(function () { return resolveGeneric(ctx, url); });
+}
+
+function resolveDTube(ctx, url) {
+  var author = '', permlink = '', m = /#!\/([^/?#]+)\/([^/?#]+)/.exec(url);
+  if (m) {
+    author = decodeURIComponent(m[1]);
+    permlink = decodeURIComponent(m[2]);
+  } else {
+    m = /\/v\/([^/?#]+)\/([^/?#]+)/.exec(url);
+    if (m) { author = decodeURIComponent(m[1]); permlink = decodeURIComponent(m[2]); }
+  }
+  if (!author || !permlink) return resolveGeneric(ctx, url);
+  var api = 'https://avalon.d.tube/content/' + encodeURIComponent(author) + '/' + encodeURIComponent(permlink);
+  return getJson(ctx, api, { referer: 'https://emb.d.tube/' }).then(function (j) {
+    var video = j && (j.json || j);
+    if (!video) return resolveGeneric(ctx, url);
+    var files = video.files || {}, out = [], seen = {};
+    var providers = ['ipfs', 'btfs', 'sia'];
+    for (var i = 0; i < providers.length; i++) {
+      var provider = providers[i], node = files[provider];
+      if (!node || !node.vid) continue;
+      var gateway = node.gw || '';
+      if (gateway) {
+        gateway = gateway.replace(/\/+$/, '') + '/';
+        if (!/\/(?:ipfs|btfs|sia)\/$/i.test(gateway)) gateway += provider + '/';
+      } else {
+        gateway = provider === 'btfs' ? 'https://player.d.tube/btfs/' :
+          (provider === 'sia' ? 'https://siasky.net/' : 'https://player.d.tube/ipfs/');
+      }
+      for (var key in node.vid) {
+        var val = node.vid[key];
+        if (!val || typeof val !== 'string') continue;
+        var mediaUrl = /^https?:\/\//i.test(val) ? val :
+          (val.indexOf('//') === 0 ? 'https:' + val :
+          (val.indexOf('/') === 0 ? gateway.replace(/\/+$/, '') + val :
+          gateway + val.replace(/^ipfs:\/\//i, '').replace(/^btfs:\/\//i, '')));
+        if (seen[mediaUrl]) continue;
+        seen[mediaUrl] = 1;
+        out.push({
+          url: mediaUrl,
+          quality: key === 'src' ? 'Source' : (key + 'p'),
+          type: /\.m3u8(?:[?#]|$)/i.test(mediaUrl) ? 'hls' : 'mp4',
+          headers: { 'User-Agent': UA, 'Referer': 'https://emb.d.tube/' }
+        });
+      }
+    }
+
+    // Format lama DTube menyimpan hash di properti ipfs/video*hash.
+    if (!out.length) {
+      var old = video.ipfs || (video.content && video.content.ipfs) || {};
+      var oldKeys = ['video1080hash', 'video720hash', 'video480hash', 'video240hash', 'videohash'];
+      for (var k = 0; k < oldKeys.length; k++) {
+        var hash = old[oldKeys[k]];
+        if (!hash) continue;
+        var oldUrl = /^https?:\/\//i.test(hash) ? hash : 'https://player.d.tube/ipfs/' + hash;
+        if (!seen[oldUrl]) {
+          seen[oldUrl] = 1;
+          out.push({
+            url: oldUrl,
+            quality: oldKeys[k] === 'videohash' ? 'Source' : oldKeys[k].replace('video', '').replace('hash', '') + 'p',
+            type: /\.m3u8(?:[?#]|$)/i.test(oldUrl) ? 'hls' : 'mp4',
+            headers: { 'User-Agent': UA, 'Referer': 'https://emb.d.tube/' }
+          });
+        }
+      }
+    }
+    return out.slice(0, 6);
+  }).catch(function () { return resolveGeneric(ctx, url); });
+}
+
+// Host lain / player kustom: cari URL media di HTML dan packed JavaScript.
+
 function resolveGeneric(ctx, url) {
   return http(ctx, url, { referer: ctx.base + '/' }).then(function (r) {
-    if (r.status >= 400) return [];
-    var t = r.text.replace(/\\\//g, '/');
-    var re = /https?:\/\/[^\s"'<>\\)]+?\.(m3u8|mp4)(?:\?[^\s"'<>\\)]*)?/gi, m, found = {}, out = [];
-    while ((m = re.exec(t))) {
-      if (found[m[0]]) continue;
-      found[m[0]] = 1;
-      out.push({
-        url: m[0], quality: 'Auto', type: m[1].toLowerCase() === 'm3u8' ? 'hls' : 'mp4',
-        headers: { 'User-Agent': UA, 'Referer': originOf(url) + '/' }
-      });
+    if (!r || r.status >= 400) return [];
+    var sources = [r.text], scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi, sm;
+    while ((sm = scriptRe.exec(r.text))) {
+      if (sm[1] && sm[1].indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
+        var unpacked = unpackPacker(sm[1]);
+        if (unpacked) sources.push(unpacked);
+      }
     }
-    return out.slice(0, 3);
+    var out = [], seen = {};
+    for (var i = 0; i < sources.length; i++) {
+      var items = scanVideoUrls(sources[i], r.url || url);
+      for (var k = 0; k < items.length; k++) {
+        if (!seen[items[k].url]) {
+          seen[items[k].url] = 1;
+          items[k].headers = { 'User-Agent': UA, 'Referer': originOf(url) + '/' };
+          out.push(items[k]);
+        }
+      }
+    }
+    return out.slice(0, 5);
   });
 }
 
 function resolveServer(ctx, srv) {
   var u = srv.url, host = hostOf(u), p;
-  if (/\.m3u8(?:[?#]|$)/i.test(u)) p = Promise.resolve([{ url: u, quality: 'Auto', type: 'hls' }]);
-  else if (/\.mp4(?:[?#]|$)/i.test(u)) p = Promise.resolve([{ url: u, quality: 'Auto', type: 'mp4' }]);
-  else if (/(^|\.)ok\.ru$/.test(host)) p = resolveOkru(ctx, u);
-  else if (/(^|\.)(dailymotion\.com|dai\.ly)$/.test(host)) p = resolveDailymotion(ctx, u);
-  else if (/(^|\.)rumble\.com$/.test(host)) p = resolveRumble(ctx, u);
-  else if (/(^|\.)(odysee\.com|d\.tube)$/.test(host)) p = Promise.resolve([]); // belum didukung
-  else p = resolveGeneric(ctx, u);
+  if (/\.m3u8(?:[?#]|$)/i.test(u)) {
+    p = Promise.resolve([{ url: u, quality: 'Auto', type: 'hls' }]);
+  } else if (/\.mp4(?:[?#]|$)/i.test(u)) {
+    p = Promise.resolve([{ url: u, quality: 'Auto', type: 'mp4' }]);
+  } else if (/(^|\.)ok\.ru$/.test(host)) {
+    p = resolveOkru(ctx, u);
+  } else if (/(^|\.)(dailymotion\.com|dai\.ly)$/.test(host)) {
+    p = resolveDailymotion(ctx, u);
+  } else if (/(^|\.)rumble\.com$/.test(host)) {
+    p = resolveRumble(ctx, u);
+  } else if (/(^|\.)(vidara\.(to|so)|vidaraa\.cc)$/.test(host)) {
+    p = resolveVidara(ctx, u);
+  } else if (/(^|\.)(rubyvidhub\.com|streamruby\.[a-z]+|stm ruby\.[a-z]+)$/.test(host.replace(/ /g, ''))) {
+    p = resolveStreamruby(ctx, u);
+  } else if (/vidhide/.test(host)) {
+    p = resolveVidHide(ctx, u);
+  } else if (/(^|\.)d\.tube$/.test(host)) {
+    p = resolveDTube(ctx, u);
+  } else if (/(^|\.)odysee\.com$/.test(host)) {
+    p = resolveOdysee(ctx, u);
+  } else {
+    p = resolveGeneric(ctx, u);
+  }
 
   return p.then(function (items) {
     var label = srv.label || host;
@@ -523,11 +848,22 @@ function resolveServer(ctx, srv) {
     for (var i = 0; i < (items || []).length; i++) {
       var item = items[i] || {};
       if (!item.url) continue;
-      out.push({url:item.url,name:base+' - '+label+(item.quality?' ('+item.quality+')':''),title:base,quality:item.quality||'Auto',type:item.type||(/\.m3u8(?:[?#]|$)/i.test(item.url)?'hls':'mp4'),headers:item.headers||{'User-Agent':UA,'Referer':originOf(u)+'/' }});
+      out.push({
+        url: item.url,
+        name: base + ' - ' + label + (item.quality ? ' (' + item.quality + ')' : ''),
+        title: base,
+        quality: item.quality || 'Auto',
+        type: item.type || (/\.m3u8(?:[?#]|$)/i.test(item.url) ? 'hls' : 'mp4'),
+        headers: item.headers || { 'User-Agent': UA, 'Referer': originOf(u) + '/' }
+      });
     }
     return out;
-  }).catch(function(){return [];});
+  }).catch(function (e) {
+    log('resolver gagal', srv.label || host, e && e.message);
+    return [];
+  });
 }
+
 function getStreams(tmdbId,mediaType,season,episode){
   var type=String(mediaType||'').toLowerCase()==='movie'?'movie':'tv';
   var s=parseInt(season,10)||1,e=parseInt(episode,10)||1;
@@ -552,7 +888,7 @@ function getStreams(tmdbId,mediaType,season,episode){
             if(!epPage)return [];
             var servers=extractServers(epPage.text,epPage.url||episodeUrl),serverTasks=[];
             for(var z=0;z<servers.length;z++)(function(server){serverTasks.push(function(){return resolveServer(ctx,server);});})(servers[z]);
-            return runSeq(serverTasks,function(v){return !!(v&&v.length);}).then(function(v){return v||[];});
+            return runAll(serverTasks).then(function(v){return v||[];});
           });
         });});
       })(ranked[c]);
