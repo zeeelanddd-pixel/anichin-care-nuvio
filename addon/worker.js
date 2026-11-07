@@ -16,10 +16,7 @@ const DEFAULT_SEARCH_TERMS = [
   "Yi Nian Yong Heng", "The King's Avatar", "Quanzhi Gaoshou",
   "Fog Hill of Five Elements", "Wu Shan Wu Xing", "The Westward",
   "Link Click", "Shiguang Dailiren", "Heaven Official's Blessing",
-  "Tian Guan Ci Fu", "Grandmaster of Demonic Cultivation", "Mo Dao Zu Shi",
-  "Spirit Cage", "Ling Long", "Scissor Seven", "Cike Wu Liuqi",
-  "The Legend of Hei", "Luo Xiaohei Zhanji", "Nezha", "White Snake",
-  "New Gods Nezha Reborn", "Deep Sea", "Chang An San Wan Li"
+  "Tian Guan Ci Fu", "Spirit Cage", "Scissor Seven"
 ];
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
