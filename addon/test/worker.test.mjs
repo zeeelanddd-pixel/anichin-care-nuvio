@@ -24,12 +24,12 @@ function mockFetch(url, options = {}) {
     const keyword = JSON.parse(options.body || "{}").keyword || "";
     return Promise.resolve(new Response(JSON.stringify({
       data: [{
-        id: keyword === "电影测试" ? 2002 : 2001,
+        id: keyword === "Movie Test" ? 2002 : 2001,
         name: "Mock Bangumi",
-        name_cn: keyword === "电影测试" ? "测试剧场版" : "测试国创",
+        name_cn: keyword === "Movie Test" ? "Test Movie" : "Test Series",
         date: "2023-01-01",
-        platform: keyword === "电影测试" ? "剧场版" : "TV",
-        eps: keyword === "电影测试" ? 1 : 24,
+        platform: keyword === "Movie Test" ? "Movie" : "TV",
+        eps: keyword === "Movie Test" ? 1 : 24,
         score: 8.1,
         images: { large: "https://example.com/bangumi.jpg" }
       }]
@@ -87,7 +87,7 @@ test("Bangumi movie search is classified into the movie catalog", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = mockFetch;
   try {
-    const response = await worker.fetch(new Request("https://addon.test/catalog/movie/donghua-movies.json?search=%E7%94%B5%E5%BD%B1%E6%B5%8B%E8%AF%95"));
+    const response = await worker.fetch(new Request("https://addon.test/catalog/movie/donghua-movies.json?search=Movie%20Test"));
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.ok(payload.metas.some(x => x.id === "bangumi:2002" && x.type === "movie"));
