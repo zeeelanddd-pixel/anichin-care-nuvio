@@ -175,9 +175,16 @@ function runAll(tasks) {
     }).then(function (v) { return v || []; }, function () { return []; }));
   })(tasks[i]);
   return Promise.all(pending).then(function (parts) {
-    var out = [];
+    var out = [], seen = {};
     for (var j = 0; j < parts.length; j++) {
-      if (parts[j] && parts[j].length) out = out.concat(parts[j]);
+      if (!parts[j] || !parts[j].length) continue;
+      for (var k = 0; k < parts[j].length; k++) {
+        var item = parts[j][k], key = item && item.url;
+        if (key && !seen[key]) {
+          seen[key] = 1;
+          out.push(item);
+        }
+      }
     }
     return out;
   });
@@ -887,8 +894,9 @@ function getStreams(tmdbId,mediaType,season,episode){
           return getHtml(ctx,episodeUrl,pageUrl).then(function(epPage){
             if(!epPage)return [];
             var servers=extractServers(epPage.text,epPage.url||episodeUrl),serverTasks=[];
+            log('server ditemukan',servers.length,servers.map(function(x){return x.label;}).join(', '));
             for(var z=0;z<servers.length;z++)(function(server){serverTasks.push(function(){return resolveServer(ctx,server);});})(servers[z]);
-            return runAll(serverTasks).then(function(v){return v||[];});
+            return runAll(serverTasks).then(function(v){log('stream berhasil',v.length);return v||[];});
           });
         });});
       })(ranked[c]);
