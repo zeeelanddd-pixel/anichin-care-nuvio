@@ -7,6 +7,18 @@
 
 const KITSU_API = "https://kitsu.io/api/edge";
 const PAGE_SIZE = 20;
+const DEFAULT_SEARCH_TERMS = [
+  "donghua",
+  "Soul Land",
+  "Battle Through the Heavens",
+  "Perfect World",
+  "Swallowed Star",
+  "Renegade Immortal",
+  "A Will Eternal",
+  "The Kings Avatar",
+  "Fog Hill of Five Elements",
+  "The Westward"
+];
 // Exclude known false positives returned by Kitsu text search.
 const EXCLUDED_IDS = new Set([
   "49575", // Pokemon Animated Pokedex: Eevee
@@ -25,9 +37,9 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "0.5.0",
+  version: "0.6.0",
   name: "Donghua Catalog",
-  description: "Katalog donghua dari Kitsu dengan penyaringan judul yang diketahui tidak relevan. Tidak menyediakan streaming.",
+  description: "Katalog donghua multi-pencarian dari Kitsu dengan penggabungan dan deduplikasi judul. Tidak menyediakan streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
   idPrefixes: ["kitsu:"],
@@ -121,22 +133,29 @@ async function getCatalog(type, params) {
   const search = (params.get("search") || "").trim();
   const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
   const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
-  const terms = search ? [search] : ["donghua"];
+  // Default catalog searches several well-known donghua names in parallel.
+  // A user-entered search remains an exact single-query search.
+  const terms = search ? [search] : DEFAULT_SEARCH_TERMS;
+  const results = await Promise.all(
+    terms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))
+  );
   const collected = new Map();
 
-  // Kitsu search is text-based. Use the specific "donghua" term for the
-  // default catalog to reduce unrelated anime. User search replaces this term.
-  for (const term of terms) {
-    const result = await searchKitsu(term, subtype, skip);
+  for (const result of results) {
     for (const item of (result.data || [])) {
       if (EXCLUDED_IDS.has(String(item.id))) continue;
       if (!collected.has(item.id)) collected.set(item.id, item);
     }
   }
 
-  const items = [...collected.values()];
+  // Merge by popularity so results from different search terms have a
+  // consistent order. Apply skip after merging to keep global pagination.
+  const items = [...collected.values()].sort((a, b) =>
+    Number(b.attributes?.userCount || 0) - Number(a.attributes?.userCount || 0)
+  );
+
   return {
-    metas: items.slice(0, PAGE_SIZE).map((item) => toMetaPreview(item, type))
+    metas: items.slice(skip, skip + PAGE_SIZE).map((item) => toMetaPreview(item, type))
   };
 }
 
