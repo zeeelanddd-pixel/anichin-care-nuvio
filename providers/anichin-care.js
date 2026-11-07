@@ -1,30 +1,28 @@
 /*
- * Anichin Care - provider Nuvio untuk anichin.moe
+ * Anichin Care — provider Nuvio untuk anichin.moe
  *
- * Runtime: QuickJS di Nuvio (React Native). Kode sengaja ditulis ES5-compatible:
- * tanpa async/await, tanpa arrow function, tanpa template literal,
- * tanpa optional chaining (?.), tanpa nullish coalescing (??), tanpa new URL().
+ * Aturan runtime (QuickJS di Nuvio Mobile): gaya ES5 + Promise .then(), tanpa API Node, tanpa `new URL()`,
+ * dan TANPA setTimeout/clearTimeout (tidak ada di runtime; batas waktu dijaga lewat budget total).
+ * Alur:
+ *   TMDB id -> judul -> cari halaman episode -> ambil daftar server (select.mirror, iframe base64)
+ *   -> resolve embed (Okru / Dailymotion / Rumble / generik) menjadi URL m3u8/mp4 langsung.
  *
- * Alur: tmdbId -> judul (TMDB) -> cari halaman episode di anichin
- *       -> ambil daftar server (select.mirror berisi iframe base64)
- *       -> resolve embed (Okru / Dailymotion / Rumble / DTube / Odysee / Vidara / VidHide / StreamRuby / generik) -> m3u8/mp4.
- *
- * Nuvio hanya bisa memutar URL media langsung (m3u8/mp4); URL halaman embed
- * (mis. https://ok.ru/videoembed/123) TIDAK bisa diputar, harus di-resolve dulu.
+ * Catatan: Nuvio hanya bisa memutar URL media langsung (m3u8/mp4). URL halaman embed
+ * (mis. https://ok.ru/videoembed/123) TIDAK bisa diputar, jadi harus di-resolve dulu.
  */
+var cheerio = require('cheerio-without-node-native');
 
-/* ---------------- Konfigurasi ---------------- */
+/* ───────────── Konfigurasi ───────────── */
 var PROVIDER_ID = 'anichin-care';
 var PROVIDER_NAME = 'Anichin';
-var PROVIDER_VERSION = '0.8';
-var BASES = ['https://anichin.moe']; // tambahkan domain cadangan bila situs pindah
-// Nuvio umumnya menyuntikkan TMDB_API_KEY. Jika tidak ada, pakai key cadangan.
-var TMDB_KEY = (typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? TMDB_API_KEY : '1865f43a0549ca50d341dd9ab8b29f49';
-var REQ_TIMEOUT = 9000;    // batas per request (ms)
+var BASES = ['https://anichin.moe']; // tambahkan domain cadangan di sini bila situs pindah
+// Nuvio biasanya menyuntikkan TMDB_API_KEY. Jika tidak ada, isi key TMDB gratis Anda di sini.
+var TMDB_KEY = (typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? TMDB_API_KEY : '';
+var PLUGIN_VERSION = '1.1.1'; // muncul di log: pastikan versi inilah yang dimuat Nuvio
 var TOTAL_BUDGET = 40000;  // batas total satu panggilan getStreams (ms)
 var UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-/* ---------------- Util umum ---------------- */
+/* ───────────── Util umum ───────────── */
 function log() {
   try {
     var a = ['[AnichinCare]'];
@@ -41,7 +39,7 @@ function unique(arr) {
   return out;
 }
 
-function pad2(n) { n = parseInt(n, 10) || 0; return n < 10 ? '0' + n : String(n); }
+function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
 function decodeEntities(s) {
   return String(s || '')
@@ -54,7 +52,7 @@ function decodeEntities(s) {
     .replace(/&amp;/g, '&');
 }
 
-// Base64 decode manual (jaga-jaga atob tidak tersedia)
+// Base64 manual (jaga-jaga atob tidak tersedia di Hermes)
 function b64decode(str) {
   var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   str = String(str).replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+\/]/g, '');
@@ -97,7 +95,7 @@ function absUrl(u, base) {
   return '';
 }
 
-/* ---------------- Pencocokan judul ---------------- */
+/* ───────────── Pencocokan judul ───────────── */
 var ROMAN = { ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8 };
 
 function norm(s) {
@@ -118,34 +116,6 @@ function seasonOf(title) {
   return 0;
 }
 
-// Alias judul katalog ke nama alternatif yang umum dipakai Anichin.
-var TITLE_ALIASES = {
-  'soul land': ['Douluo Dalu', 'Combat Continent'],
-  'soul land 2': ['Douluo Dalu 2', 'The Unrivaled Tang Sect'],
-  'soul land 3': ['Douluo Dalu 3', 'The Legend of the Dragon King'],
-  'soul land 4': ['Douluo Dalu 4', 'Ultimate Douluo'],
-  'battle through the heavens': ['Doupo Cangqiong', 'Fights Break Sphere'],
-  'perfect world': ['Wanmei Shijie'],
-  'swallowed star': ['Tunshi Xingkong'],
-  'renegade immortal': ['Xian Ni'],
-  'a will eternal': ['Yi Nian Yong Heng'],
-  'the kings avatar': ['Quanzhi Gaoshou'],
-  'martial universe': ['Wu Dong Qian Kun'],
-  'stellar transformations': ['Xing Chen Bian'],
-  'throne of seal': ['Shen Yin Wangzuo'],
-  'the great ruler': ['Da Zhu Zai'],
-  'apotheosis': ['Bai Lian Cheng Shen'],
-  'immortality': ['Yong Sheng'],
-  'the westward': ['Xi Xing Ji'],
-  'fog hill of five elements': ['Wu Shan Wu Xing'],
-  'spirit cage': ['Ling Long', 'Ling Cage'],
-  'dragon prince yuan': ['Yuan Zun'],
-  'stellar swordmaster': ['Xing Wu Shen Jue']
-};
-function aliasesFor(title) {
-  return (TITLE_ALIASES[norm(title)] || []).slice(0);
-}
-
 function baseName(title) {
   return norm(title)
     .replace(/\bseason \d+\b/g, ' ')
@@ -164,25 +134,15 @@ function similarity(a, b) {
   return (2 * hit) / (A.length + B.length);
 }
 
-/* ---------------- Promise & HTTP ---------------- */
-function withTimeout(p, ms, label) {
-  return new Promise(function (resolve, reject) {
-    var finished = false;
-    var timer = setTimeout(function () {
-      if (!finished) { finished = true; reject(new Error('timeout: ' + label)); }
-    }, ms);
-    p.then(function (v) {
-      if (!finished) { finished = true; clearTimeout(timer); resolve(v); }
-    }, function (e) {
-      if (!finished) { finished = true; clearTimeout(timer); reject(e); }
-    });
-  });
+function qnum(q) {
+  var m = /(\d+)/.exec(String(q || ''));
+  return m ? parseInt(m[1], 10) : 0;
 }
 
+/* ───────────── Promise & HTTP ───────────── */
 function hasItems(r) { return !!(r && r.length); }
-function isValue(r) { return !!r; }
 
-// Jalankan task satu per satu sampai ada yang menghasilkan sesuai kriteria `done`
+// Jalankan task satu per satu sampai ada yang menghasilkan sesuatu
 function runSeq(tasks, done) {
   done = done || hasItems;
   var i = 0;
@@ -194,29 +154,6 @@ function runSeq(tasks, done) {
     }, function () { return next(); });
   }
   return next();
-}
-
-function runAll(tasks) {
-  var pending = [];
-  for (var i = 0; i < tasks.length; i++) (function (task) {
-    pending.push(new Promise(function (resolve) {
-      try { resolve(task()); } catch (e) { resolve([]); }
-    }).then(function (v) { return v || []; }, function () { return []; }));
-  })(tasks[i]);
-  return Promise.all(pending).then(function (parts) {
-    var out = [], seen = {};
-    for (var j = 0; j < parts.length; j++) {
-      if (!parts[j] || !parts[j].length) continue;
-      for (var k = 0; k < parts[j].length; k++) {
-        var item = parts[j][k], key = item && item.url;
-        if (key && !seen[key]) {
-          seen[key] = 1;
-          out.push(item);
-        }
-      }
-    }
-    return out;
-  });
 }
 
 function http(ctx, url, o) {
@@ -235,47 +172,12 @@ function http(ctx, url, o) {
       return { status: res.status, url: res.url || url, text: text || '' };
     });
   });
-  return withTimeout(p, Math.min(REQ_TIMEOUT, left), url);
-}
-
-function postText(ctx, url, body, o) {
-  o = o || {};
-  var left = ctx.deadline - Date.now();
-  if (left < 1500) return Promise.reject(new Error('budget waktu habis'));
-  var headers = {
-    'User-Agent': UA,
-    'Accept': o.json ? 'application/json, text/plain, */*' : 'text/plain, */*',
-    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Content-Type': o.contentType || 'application/json'
-  };
-  if (o.referer) headers['Referer'] = o.referer;
-  if (o.headers) { for (var k in o.headers) headers[k] = o.headers[k]; }
-  var p = fetch(url, {
-    method: 'POST',
-    headers: headers,
-    body: body,
-    redirect: 'follow'
-  }).then(function (res) {
-    return res.text().then(function (text) {
-      return { status: res.status, url: res.url || url, text: text || '' };
-    });
-  });
-  return withTimeout(p, Math.min(REQ_TIMEOUT, left), url);
-}
-
-function postJson(ctx, url, data, o) {
-  o = o || {};
-  o.contentType = 'application/json';
-  o.json = true;
-  return postText(ctx, url, JSON.stringify(data), o).then(function (r) {
-    if (!r || r.status >= 400) return null;
-    try { return JSON.parse(r.text); } catch (e) { return null; }
-  }).catch(function () { return null; });
+  return p; // tanpa setTimeout: andalkan timeout bawaan fetch native + budget total (ctx.deadline)
 }
 
 function blocked(r) {
   if (r.status === 403 || r.status === 429 || r.status === 503) return true;
-  return r.text.length < 8000 && /just a moment|cf-browser-verification|challenge-platform|attention required|cf-chl/i.test(r.text);
+  return r.text.length < 8000 && /just a moment|cf-browser-verification|challenge-platform|attention required/i.test(r.text);
 }
 
 // null jika diblokir Cloudflare / error HTTP
@@ -296,7 +198,7 @@ function getJson(ctx, url, o) {
   }).catch(function () { return null; });
 }
 
-/* ---------------- TMDB ---------------- */
+/* ───────────── TMDB ───────────── */
 function tmdb(ctx, path, params) {
   if (!TMDB_KEY) return Promise.resolve(null);
   var qs = 'api_key=' + encodeURIComponent(TMDB_KEY);
@@ -307,9 +209,8 @@ function tmdb(ctx, path, params) {
 function parseContentId(id) {
   var s = String(id == null ? '' : id).trim(), m;
   if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };
-  if ((m = /^kitsu:(\d+)/i.exec(s))) return { kind: 'kitsu', id: m[1] };
-  if ((m = /^bangumi:(\d+)/i.exec(s))) return { kind: 'bangumi', id: m[1] };
   if ((m = /(tt\d+)/i.exec(s))) return { kind: 'imdb', id: m[1] };
+  if ((m = /^mal:(\d+)/i.exec(s))) return { kind: 'mal', id: m[1] };
   if (/^\d+$/.test(s)) return { kind: 'tmdb', id: s };
   return { kind: 'unknown', id: s };
 }
@@ -319,31 +220,17 @@ function isLatin(t) {
 }
 
 function resolveMeta(ctx, parsed) {
-  var kind = ctx.type === 'movie' ? 'movie' : 'tv', idP;
-  if (parsed.kind === 'kitsu') {
-    return getJson(ctx, 'https://kitsu.io/api/edge/anime/' + encodeURIComponent(parsed.id), { referer: 'https://kitsu.io/' }).then(function (payload) {
-      var a = payload && payload.data && payload.data.attributes;
-      if (!a) return null;
-      var t = a.titles || {}, list = [t.en, t.en_jp, a.canonicalTitle, t.ja_jp], titles = [];
-      for (var i = 0; i < list.length; i++) if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
-      return { titles: unique(titles), seasons: [] };
-    }).catch(function () { return null; });
-  }
-  if (parsed.kind === 'bangumi') {
-    return getJson(ctx, 'https://api.bgm.tv/v0/subjects/' + encodeURIComponent(parsed.id), { referer: 'https://bgm.tv/' }).then(function (item) {
-      if (!item) return null;
-      var list = [item.name, item.name_cn], titles = [];
-      for (var i = 0; i < list.length; i++) if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
-      return { titles: unique(titles), seasons: [] };
-    }).catch(function () { return null; });
-  }
-  if (parsed.kind === 'tmdb') idP = Promise.resolve(parsed.id);
-  else if (parsed.kind === 'imdb') {
+  var kind = ctx.type, idP;
+  if (parsed.kind === 'tmdb') {
+    idP = Promise.resolve(parsed.id);
+  } else if (parsed.kind === 'imdb') {
     idP = tmdb(ctx, '/find/' + parsed.id, { external_source: 'imdb_id' }).then(function (j) {
       var arr = j && (kind === 'movie' ? j.movie_results : j.tv_results);
       return arr && arr[0] ? String(arr[0].id) : null;
     });
-  } else idP = Promise.resolve(null);
+  } else {
+    idP = Promise.resolve(null);
+  }
   return idP.then(function (id) {
     if (!id) return null;
     return Promise.all([
@@ -354,9 +241,11 @@ function resolveMeta(ctx, parsed) {
       if (!d) return null;
       var list = [d.name || d.title, d.original_name || d.original_title];
       var extra = (alt && (alt.results || alt.titles)) || [];
-      for (var i = 0; i < extra.length; i++) list.push(extra[i].title);
-      var titles = [];
-      for (var j = 0; j < list.length; j++) if (list[j] && isLatin(list[j])) titles.push(String(list[j]).trim());
+      var i, titles = [];
+      for (i = 0; i < extra.length; i++) list.push(extra[i].title);
+      for (i = 0; i < list.length; i++) {
+        if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+      }
       return { titles: unique(titles).slice(0, 5), seasons: d.seasons || [] };
     });
   });
@@ -372,21 +261,42 @@ function absoluteEpisode(seasons, season, episode) {
   return total + episode;
 }
 
-/* ---------------- Parsing halaman situs (tema AnimeStream) ---------------- */
-// Kartu hasil pencarian / daftar: <article class="... bs ...">
+/* ───────────── Parsing halaman situs (tema AnimeStream) ───────────── */
+// Kartu hasil pencarian / daftar: .listupd article.bs
+// Catatan: cheerio di Nuvio adalah polyfill ringan (selector dijalankan native, callback .each
+// menerima (i, el)). Bila gagal atau kosong, dipakai parser regex sebagai cadangan.
 function parseCards(html, pageUrl) {
-  var out = [], seen = {};
-  var re = /<article\b[^>]*class="[^"]*\bbs\b[^"]*"[\s\S]*?<\/article>/gi, m;
+  var out = [];
+  try {
+    var $ = cheerio.load(html), seen = {};
+    $('article.bs, .listupd .bs').each(function (i, el) {
+      var box = $(el);
+      var a = box.find('a[href]').first();
+      var url = absUrl(a.attr('href'), pageUrl);
+      if (!url || seen[url]) return;
+      var title = a.attr('title') || box.find('h2').first().text() || box.find('.tt').first().text() || '';
+      title = decodeEntities(title).replace(/\s+/g, ' ').trim();
+      if (!title) return;
+      seen[url] = 1;
+      out.push({ url: url, title: title });
+    });
+  } catch (e) {
+    log('cheerio gagal (kartu), pakai regex:', e && e.message);
+    out = [];
+  }
+  return out.length ? out : parseCardsRegex(html, pageUrl);
+}
+
+function parseCardsRegex(html, pageUrl) {
+  var out = [], seen = {}, m;
+  var re = /<article\b[^>]*\bclass\s*=\s*["'][^"']*\bbs\b[^"']*["'][^>]*>([\s\S]*?)<\/article>/gi;
   while ((m = re.exec(html))) {
-    var block = m[0];
-    var am = /<a\b[^>]*href="([^"]+)"[^>]*>/i.exec(block);
-    if (!am) continue;
-    var url = absUrl(am[1], pageUrl);
+    var a = /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/i.exec(m[1]);
+    if (!a) continue;
+    var url = absUrl(a[1], pageUrl);
     if (!url || seen[url]) continue;
-    var tm = /\btitle="([^"]*)"/i.exec(am[0]) ||
-             /<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(block) ||
-             /class="tt"[^>]*>([\s\S]*?)</i.exec(block);
-    var title = tm ? decodeEntities(tm[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : '';
+    var t = /\btitle\s*=\s*["']([^"']+)["']/i.exec(a[0]) || /<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(m[1]);
+    var title = t ? decodeEntities(String(t[1]).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : '';
     if (!title) continue;
     seen[url] = 1;
     out.push({ url: url, title: title });
@@ -394,22 +304,42 @@ function parseCards(html, pageUrl) {
   return out;
 }
 
-// Deteksi episode dari pola URL umum dan nomor pada teks anchor.
+function addEpisode(out, seen, href, label, pageUrl) {
+  var url = absUrl(href, pageUrl);
+  if (!url || seen[url]) return;
+  var m = /(\d+(?:\.\d+)?)/.exec(String(label || '')) || /episode-0*(\d+)/i.exec(url);
+  seen[url] = 1;
+  out.push({ url: url, num: m ? parseFloat(m[1]) : null });
+}
+
+// Daftar episode di halaman series: .eplister li a
 function parseEpisodes(html, pageUrl) {
   var out = [], seen = {};
-  var re = /<a\b([^>]*?)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi, m;
-  while ((m = re.exec(String(html || '')))) {
-    var rawUrl = decodeEntities(m[2]);
-    var attrs = m[1] + ' ' + m[3];
-    var label = decodeEntities(String(m[4] || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
-    var hit = /(?:episode|episodes|ep|eps)[-_/ .#]*0*(\d+(?:\.\d+)?)/i.exec(rawUrl)
-      || /(?:^|[\s[(])(?:episode|ep|eps?)\s*0*(\d+(?:\.\d+)?)(?:$|[\s)\].:-])/i.exec(label)
-      || /data-(?:episode|ep|num)=["']?0*(\d+(?:\.\d+)?)/i.exec(attrs);
-    if (!hit) continue;
-    var url = absUrl(rawUrl, pageUrl);
-    if (!url || seen[url]) continue;
-    seen[url] = 1;
-    out.push({ url: url, num: parseFloat(hit[1]) });
+  try {
+    var $ = cheerio.load(html);
+    $('.eplister li a').each(function (i, el) {
+      var a = $(el);
+      addEpisode(out, seen, a.attr('href'), a.find('.epl-num').first().text(), pageUrl);
+    });
+    if (!out.length) {
+      $('a[href*="episode-"]').each(function (i, el) { addEpisode(out, seen, $(el).attr('href'), '', pageUrl); });
+    }
+  } catch (e) {
+    log('cheerio gagal (episode), pakai regex:', e && e.message);
+    out = []; seen = {};
+  }
+  return out.length ? out : parseEpisodesRegex(html, pageUrl);
+}
+
+function parseEpisodesRegex(html, pageUrl) {
+  var out = [], seen = {}, m, n;
+  var box = /<(?:div|ul)\b[^>]*\bclass\s*=\s*["'][^"']*\beplister\b[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i.exec(html);
+  var scope = box ? box[1] : html;
+  var re = /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  while ((m = re.exec(scope))) {
+    if (!box && !/episode-\d+/i.test(m[1])) continue; // tanpa blok eplister: hanya tautan mirip episode
+    n = /epl-num[^>]*>([^<]*)</i.exec(m[2]);
+    addEpisode(out, seen, m[1], n ? n[1] : '', pageUrl);
   }
   return out;
 }
@@ -442,8 +372,8 @@ function titleOk(ctx, html) {
   if (ctx.type === 'movie') return true;
   var t = pageTitle(html).replace(/\s*(?:episode|eps?)\s*\d+.*$/i, '').replace(/\s+[-\u2013|]\s+.*$/, '');
   if (!norm(t)) return true;
-  var best = 0, matchTitles = ctx.matchTitles || ctx.titles;
-  for (var i = 0; i < matchTitles.length; i++) best = Math.max(best, similarity(t, matchTitles[i]));
+  var best = 0;
+  for (var i = 0; i < ctx.titles.length; i++) best = Math.max(best, similarity(t, ctx.titles[i]));
   return best >= 0.5;
 }
 
@@ -461,13 +391,13 @@ function rankCandidates(cands, titles, season) {
     } else if (cs > 1) {
       score -= 0.4;
     }
-    if (score >= 0.4) out.push({ url: c.url, title: c.title, score: score, season: cs });
+    if (score >= 0.5) out.push({ url: c.url, title: c.title, score: score, season: cs });
   }
   out.sort(function (a, b) { return b.score - a.score; });
   return out;
 }
 
-/* ---------------- Ekstrak server dari halaman episode ---------------- */
+/* ───────────── Ekstrak server dari halaman episode ───────────── */
 // <select class="mirror"><option value="BASE64(<iframe src=...>)">Okru</option>...
 function extractServers(html, pageUrl) {
   var servers = [], seen = {}, pageHost = hostOf(pageUrl);
@@ -500,7 +430,7 @@ function extractServers(html, pageUrl) {
     fromSnippet(dec, label);
   }
 
-  // 1) dropdown server (value = base64 iframe)
+  // 1) dropdown server
   var selRe = /<select\b[^>]*(?:class|name)\s*=\s*["'][^"']*mirror[^"']*["'][^>]*>([\s\S]*?)<\/select>/gi, sm;
   while ((sm = selRe.exec(html))) {
     var optRe = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi, om;
@@ -524,7 +454,7 @@ function extractServers(html, pageUrl) {
   return servers;
 }
 
-/* ---------------- Resolver embed -> URL langsung ---------------- */
+/* ───────────── Resolver embed -> URL langsung ───────────── */
 var OK_Q = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
 
 function okruStreams(meta) {
@@ -546,10 +476,10 @@ function resolveOkru(ctx, url) {
   if (!m) return Promise.resolve([]);
   var embed = 'https://ok.ru/videoembed/' + m[1];
   return http(ctx, embed, { referer: ctx.base + '/' }).then(function (r) {
-    var mm = /data-options\s*=\s*(["'])([\s\S]*?)\1/.exec(r.text);
+    var mm = /data-options="([^"]+)"/.exec(r.text);
     if (!mm) return [];
     var opts;
-    try { opts = JSON.parse(decodeEntities(mm[2])); } catch (e) { return []; }
+    try { opts = JSON.parse(decodeEntities(mm[1])); } catch (e) { return []; }
     var fv = (opts && opts.flashvars) || {}, metaP;
     if (fv.metadata) {
       try { metaP = Promise.resolve(typeof fv.metadata === 'string' ? JSON.parse(fv.metadata) : fv.metadata); }
@@ -566,28 +496,11 @@ function resolveOkru(ctx, url) {
 function resolveDailymotion(ctx, url) {
   var m = /(?:\/video\/|[?&]video=|dai\.ly\/)([a-z0-9]+)/i.exec(url);
   if (!m) return Promise.resolve([]);
-  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] +
-    '?embedder=' + encodeURIComponent(ctx.base + '/');
+  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] + '?embedder=' + encodeURIComponent(ctx.base + '/');
   return getJson(ctx, api, { referer: ctx.base + '/' }).then(function (j) {
-    var qualities = j && j.qualities, out = [], seen = {};
-    if (!qualities) return out;
-    var order = ['auto', '1080', '720', '576', '480', '380', '240'];
-    for (var i = 0; i < order.length; i++) {
-      var key = order[i], list = qualities[key];
-      if (!list || !list.length) continue;
-      for (var k = 0; k < list.length; k++) {
-        var item = list[k], u = item && item.url;
-        if (!u || seen[u]) continue;
-        seen[u] = 1;
-        out.push({
-          url: u,
-          quality: key === 'auto' ? 'Auto' : key + 'p',
-          type: /\.mp4(?:[?#]|$)/i.test(u) ? 'mp4' : 'hls',
-          headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' }
-        });
-      }
-    }
-    return out;
+    var auto = j && j.qualities && j.qualities.auto && j.qualities.auto[0];
+    if (!auto || !auto.url) return [];
+    return [{ url: auto.url, quality: 'Auto', type: 'hls', headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' } }];
   });
 }
 
@@ -611,354 +524,4 @@ function resolveRumble(ctx, url) {
   });
 }
 
-// Cari URL media di HTML/JavaScript, termasuk URL relatif yang dipakai player.
-function scanVideoUrls(text, base) {
-  var t = String(text || '')
-    .replace(/\\\//g, '/')
-    .replace(/\\u0026/gi, '&')
-    .replace(/&amp;/g, '&');
-  var re = /((?:https?:)?\/\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?|\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?)/gi;
-  var out = [], seen = {}, m;
-  while ((m = re.exec(t))) {
-    var u = absUrl(m[1], base);
-    if (!u || seen[u]) continue;
-    seen[u] = 1;
-    out.push({
-      url: u,
-      quality: 'Auto',
-      type: /\.m3u8(?:[?#]|$)/i.test(u) ? 'hls' : 'mp4'
-    });
-  }
-  return out;
-}
-
-function radixToken(n, radix) {
-  var chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  var out = '';
-  do {
-    out = chars.charAt(n % radix) + out;
-    n = Math.floor(n / radix);
-  } while (n > 0);
-  return out;
-}
-
-// Unpacker ringan untuk format Dean Edwards p.a.c.k.e.r yang dipakai beberapa host.
-function unpackPacker(text) {
-  var re = /}\('((?:\\.|[^'])*)',\s*(\d+),\s*(\d+),\s*'((?:\\.|[^'])*)'\.split\('\|'\)/;
-  var m = re.exec(String(text || ''));
-  if (!m) return '';
-  var payload = m[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-  var radix = parseInt(m[2], 10);
-  var count = parseInt(m[3], 10);
-  var words = m[4].split('|');
-  if (!radix || radix < 2 || radix > 62 || count > 5000) return '';
-  for (var i = count - 1; i >= 0; i--) {
-    if (!words[i]) continue;
-    var token = radixToken(i, radix);
-    payload = payload.replace(new RegExp('\\b' + token + '\\b', 'g'), words[i]);
-  }
-  return payload;
-}
-
-function resolveVidara(ctx, url) {
-  var file = /\/(?:e|v|d)\/([a-z0-9]+)/i.exec(url);
-  if (!file) {
-    var parts = url.split('?')[0].split('/');
-    file = [null, parts[parts.length - 1]];
-  }
-  var code = file && file[1];
-  if (!code) return Promise.resolve([]);
-  return postJson(ctx, originOf(url) + '/api/stream', {
-    filecode: code,
-    device: 'web',
-    codecs: []
-  }, { referer: url }).then(function (j) {
-    if (!j || !j.streaming_url) return [];
-    return [{
-      url: absUrl(j.streaming_url, url),
-      quality: 'Auto',
-      type: /\.m3u8(?:[?#]|$)/i.test(j.streaming_url) ? 'hls' : 'mp4',
-      headers: { 'User-Agent': UA, 'Referer': url, 'Origin': originOf(url) }
-    }];
-  });
-}
-
-function resolveStreamruby(ctx, url) {
-  var m = /embed-([a-z0-9]+)\.html/i.exec(url) ||
-          /\/(?:e|v)\/([a-z0-9]+)/i.exec(url);
-  if (!m) return Promise.resolve([]);
-  var body = 'op=embed&file_code=' + encodeURIComponent(m[1]) + '&auto=1';
-  return postText(ctx, originOf(url) + '/dl', body, {
-    referer: url,
-    contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
-    headers: { 'Origin': originOf(url) }
-  }).then(function (r) {
-    if (!r || r.status >= 400) return [];
-    var candidates = [r.text, unpackPacker(r.text)];
-    var out = [], seen = {};
-    for (var i = 0; i < candidates.length; i++) {
-      var items = scanVideoUrls(candidates[i], url);
-      for (var k = 0; k < items.length; k++) {
-        if (!seen[items[k].url]) {
-          seen[items[k].url] = 1;
-          items[k].headers = { 'User-Agent': UA, 'Referer': url };
-          out.push(items[k]);
-        }
-      }
-    }
-    return out;
-  }).catch(function () { return []; });
-}
-
-function resolveVidHide(ctx, url) {
-  return getHtml(ctx, url, ctx.base + '/').then(function (r) {
-    if (!r) return [];
-    var sources = [r.text], scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi, sm;
-    while ((sm = scriptRe.exec(r.text))) {
-      if (sm[1] && sm[1].indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
-        var unpacked = unpackPacker(sm[1]);
-        if (unpacked) sources.push(unpacked);
-      }
-    }
-    var out = [], seen = {};
-    for (var i = 0; i < sources.length; i++) {
-      var items = scanVideoUrls(sources[i], r.url || url);
-      for (var k = 0; k < items.length; k++) {
-        if (!seen[items[k].url]) {
-          seen[items[k].url] = 1;
-          items[k].headers = {
-            'User-Agent': UA,
-            'Referer': url,
-            'Origin': originOf(url)
-          };
-          out.push(items[k]);
-        }
-      }
-    }
-    return out.slice(0, 5);
-  }).catch(function () { return []; });
-}
-
-function resolveOdysee(ctx, url) {
-  var p = /odysee\.com\/(.+?)(?:[?#]|$)/i.exec(url);
-  if (!p) return Promise.resolve([]);
-  var path = decodeEntities(p[1]).replace(/^\/+|\/+$/g, '');
-  path = path.replace(/^\$\/embed\//, '').replace(/^\$\/.*?\/embed\//, '');
-  if (!path || path.charAt(0) === '$') return resolveGeneric(ctx, url);
-  var lbryUri = 'lbry://' + path;
-  return postJson(ctx, 'https://api.na-backend.odysee.com/api/v1/proxy?m=resolve', {
-    jsonrpc: '2.0',
-    method: 'resolve',
-    params: { urls: [lbryUri] }
-  }, { referer: 'https://odysee.com/' }).then(function (j) {
-    var result = j && j.result, claim = null;
-    if (result) {
-      if (Object.prototype.toString.call(result) === '[object Array]') claim = result[0];
-      else {
-        var keys = Object.keys(result);
-        if (keys.length) claim = result[keys[0]];
-      }
-    }
-    var source = claim && claim.value && claim.value.source;
-    var sd = source && source.sd_hash;
-    if (!claim || !claim.claim_id || !claim.name || !sd) return resolveGeneric(ctx, url);
-    var streamUrl = 'https://player.odycdn.com/api/v3/streams/free/' +
-      encodeURIComponent(claim.name) + '/' + claim.claim_id + '/' +
-      String(sd).substring(0, 6) + '.mp4';
-    return [{
-      url: streamUrl,
-      quality: (claim.value && claim.value.video && claim.value.video.height ?
-        String(claim.value.video.height) + 'p' : 'Auto'),
-      type: 'mp4',
-      headers: { 'User-Agent': UA, 'Referer': 'https://odysee.com/', 'Origin': 'https://odysee.com' }
-    }];
-  }).catch(function () { return resolveGeneric(ctx, url); });
-}
-
-function resolveDTube(ctx, url) {
-  var author = '', permlink = '', m = /#!\/(?:v\/)?([^/?#]+)\/([^/?#]+)/.exec(url);
-  if (m) {
-    author = decodeURIComponent(m[1]);
-    permlink = decodeURIComponent(m[2]);
-  } else {
-    m = /\/v\/([^/?#]+)\/([^/?#]+)/.exec(url);
-    if (m) { author = decodeURIComponent(m[1]); permlink = decodeURIComponent(m[2]); }
-  }
-  if (!author || !permlink) return resolveGeneric(ctx, url);
-  var api = 'https://avalon.d.tube/content/' + encodeURIComponent(author) + '/' + encodeURIComponent(permlink);
-  return getJson(ctx, api, { referer: 'https://emb.d.tube/' }).then(function (j) {
-    var video = j && (j.json || j);
-    if (!video) return resolveGeneric(ctx, url);
-    var files = video.files || {}, out = [], seen = {};
-    var providers = ['ipfs', 'btfs', 'sia'];
-    for (var i = 0; i < providers.length; i++) {
-      var provider = providers[i], node = files[provider];
-      if (!node || !node.vid) continue;
-      var gateway = node.gw || '';
-      if (gateway) {
-        gateway = gateway.replace(/\/+$/, '') + '/';
-        if (!/\/(?:ipfs|btfs|sia)\/$/i.test(gateway)) gateway += provider + '/';
-      } else {
-        gateway = provider === 'btfs' ? 'https://player.d.tube/btfs/' :
-          (provider === 'sia' ? 'https://siasky.net/' : 'https://player.d.tube/ipfs/');
-      }
-      for (var key in node.vid) {
-        var val = node.vid[key];
-        if (!val || typeof val !== 'string') continue;
-        var mediaUrl = /^https?:\/\//i.test(val) ? val :
-          (val.indexOf('//') === 0 ? 'https:' + val :
-          (val.indexOf('/') === 0 ? gateway.replace(/\/+$/, '') + val :
-          gateway + val.replace(/^ipfs:\/\//i, '').replace(/^btfs:\/\//i, '')));
-        if (seen[mediaUrl]) continue;
-        seen[mediaUrl] = 1;
-        out.push({
-          url: mediaUrl,
-          quality: key === 'src' ? 'Source' : (key + 'p'),
-          type: /\.m3u8(?:[?#]|$)/i.test(mediaUrl) ? 'hls' : 'mp4',
-          headers: { 'User-Agent': UA, 'Referer': 'https://emb.d.tube/' }
-        });
-      }
-    }
-
-    // Format lama DTube menyimpan hash di properti ipfs/video*hash.
-    if (!out.length) {
-      var old = video.ipfs || (video.content && video.content.ipfs) || {};
-      var oldKeys = ['video1080hash', 'video720hash', 'video480hash', 'video240hash', 'videohash'];
-      for (var k = 0; k < oldKeys.length; k++) {
-        var hash = old[oldKeys[k]];
-        if (!hash) continue;
-        var oldUrl = /^https?:\/\//i.test(hash) ? hash : 'https://player.d.tube/ipfs/' + hash;
-        if (!seen[oldUrl]) {
-          seen[oldUrl] = 1;
-          out.push({
-            url: oldUrl,
-            quality: oldKeys[k] === 'videohash' ? 'Source' : oldKeys[k].replace('video', '').replace('hash', '') + 'p',
-            type: /\.m3u8(?:[?#]|$)/i.test(oldUrl) ? 'hls' : 'mp4',
-            headers: { 'User-Agent': UA, 'Referer': 'https://emb.d.tube/' }
-          });
-        }
-      }
-    }
-    return out.slice(0, 6);
-  }).catch(function () { return resolveGeneric(ctx, url); });
-}
-
-// Host lain / player kustom: cari URL media di HTML dan packed JavaScript.
-
-function resolveGeneric(ctx, url) {
-  return http(ctx, url, { referer: ctx.base + '/' }).then(function (r) {
-    if (!r || r.status >= 400) return [];
-    var sources = [r.text], scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi, sm;
-    while ((sm = scriptRe.exec(r.text))) {
-      if (sm[1] && sm[1].indexOf('eval(function(p,a,c,k,e,d)') >= 0) {
-        var unpacked = unpackPacker(sm[1]);
-        if (unpacked) sources.push(unpacked);
-      }
-    }
-    var out = [], seen = {};
-    for (var i = 0; i < sources.length; i++) {
-      var items = scanVideoUrls(sources[i], r.url || url);
-      for (var k = 0; k < items.length; k++) {
-        if (!seen[items[k].url]) {
-          seen[items[k].url] = 1;
-          items[k].headers = { 'User-Agent': UA, 'Referer': originOf(url) + '/' };
-          out.push(items[k]);
-        }
-      }
-    }
-    return out.slice(0, 5);
-  });
-}
-
-function resolveServer(ctx, srv) {
-  var u = srv.url, host = hostOf(u), p;
-  if (/\.m3u8(?:[?#]|$)/i.test(u)) {
-    p = Promise.resolve([{ url: u, quality: 'Auto', type: 'hls' }]);
-  } else if (/\.mp4(?:[?#]|$)/i.test(u)) {
-    p = Promise.resolve([{ url: u, quality: 'Auto', type: 'mp4' }]);
-  } else if (/(^|\.)ok\.ru$/.test(host)) {
-    p = resolveOkru(ctx, u);
-  } else if (/(^|\.)(dailymotion\.com|dai\.ly)$/.test(host)) {
-    p = resolveDailymotion(ctx, u);
-  } else if (/(^|\.)rumble\.com$/.test(host)) {
-    p = resolveRumble(ctx, u);
-  } else if (/(^|\.)(vidara\.(to|so)|vidaraa\.cc)$/.test(host)) {
-    p = resolveVidara(ctx, u);
-  } else if (/(^|\.)(rubyvidhub\.com|streamruby\.[a-z]+|stmruby\.[a-z]+)$/.test(host.replace(/ /g, ''))) {
-    p = resolveStreamruby(ctx, u);
-  } else if (/vidhide/.test(host)) {
-    p = resolveVidHide(ctx, u);
-  } else if (/(^|\.)d\.tube$/.test(host)) {
-    p = resolveDTube(ctx, u);
-  } else if (/(^|\.)odysee\.com$/.test(host)) {
-    p = resolveOdysee(ctx, u);
-  } else {
-    p = resolveGeneric(ctx, u);
-  }
-
-  return p.then(function (items) {
-    var label = srv.label || host;
-    var t0 = (ctx.titles && ctx.titles.length) ? ctx.titles[0] : 'Video';
-    var base = t0;
-    if (ctx.type === 'tv' && ctx.season > 0) base += ' S' + pad2(ctx.season) + 'E' + pad2(ctx.episode);
-    var out = [];
-    for (var i = 0; i < (items || []).length; i++) {
-      var item = items[i] || {};
-      if (!item.url) continue;
-      out.push({
-        url: item.url,
-        name: base + ' - ' + label + (item.quality ? ' (' + item.quality + ')' : ''),
-        title: base,
-        quality: item.quality || 'Auto',
-        type: item.type || (/\.m3u8(?:[?#]|$)/i.test(item.url) ? 'hls' : 'mp4'),
-        headers: item.headers || { 'User-Agent': UA, 'Referer': originOf(u) + '/' }
-      });
-    }
-    return out;
-  }).catch(function (e) {
-    log('resolver gagal', srv.label || host, e && e.message);
-    return [];
-  });
-}
-
-function getStreams(tmdbId,mediaType,season,episode){
-  var type=String(mediaType||'').toLowerCase()==='movie'?'movie':'tv';
-  var s=parseInt(season,10)||1,e=parseInt(episode,10)||1;
-  var ctx={base:BASES[0],type:type,season:s,episode:e,titles:[],deadline:Date.now()+TOTAL_BUDGET};
-  return resolveMeta(ctx,parseContentId(tmdbId)).then(function(meta){
-    if(!meta||!meta.titles||!meta.titles.length)return [];
-    ctx.titles=meta.titles;
-    var matchTitles = meta.titles.slice(0);
-    for (var mt = 0; mt < meta.titles.length; mt++) {
-      var aliases = aliasesFor(meta.titles[mt]);
-      for (var ai = 0; ai < aliases.length; ai++) matchTitles.push(aliases[ai]);
-    }
-    ctx.matchTitles = unique(matchTitles);
-    var queries=unique(ctx.matchTitles.map(function(t){return slugify(t);}).filter(function(x){return !!x;})).slice(0,8),tasks=[];
-    for(var i=0;i<queries.length;i++)(function(q){
-      tasks.push(function(){var url=ctx.base+'/?s='+encodeURIComponent(q.replace(/-/g,' '));return getHtml(ctx,url,ctx.base+'/').then(function(r){return r?parseCards(r.text,r.url||url):[];});});
-      tasks.push(function(){var url=ctx.base+'/wp-json/wp/v2/search?search='+encodeURIComponent(q.replace(/-/g,' '))+'&per_page=10';return getJson(ctx,url,{referer:ctx.base+'/'}).then(function(j){var a=[];if(j&&j.length)for(var k=0;k<j.length;k++)if(j[k]&&j[k].url&&j[k].title&&j[k].title.rendered)a.push({url:j[k].url,title:decodeEntities(j[k].title.rendered.replace(/<[^>]+>/g,' '))});return a;});});
-    })(queries[i]);
-    return runAll(tasks).then(function(cards){
-      var ranked=rankCandidates(cards||[],ctx.matchTitles,s),candidateTasks=[];
-      for(var c=0;c<Math.min(ranked.length,6);c++)(function(candidate){
-        candidateTasks.push(function(){return getHtml(ctx,candidate.url,ctx.base+'/').then(function(page){
-          if(!page||!titleOk(ctx,page.text))return [];
-          var pageUrl=page.url||candidate.url,episodeUrl=pageUrl;
-          if(type==='tv'){var nums=[e],abs=absoluteEpisode(meta.seasons,s,e);if(abs!==e)nums.push(abs);var picked=pickEpisode(parseEpisodes(page.text,pageUrl),nums,type);if(picked)episodeUrl=picked;else if(!episodeMatches(pageUrl,nums))return [];}
-          else episodeUrl=pickEpisode(parseEpisodes(page.text,pageUrl),[],'movie')||pageUrl;
-          return getHtml(ctx,episodeUrl,pageUrl).then(function(epPage){
-            if(!epPage)return [];
-            var servers=extractServers(epPage.text,epPage.url||episodeUrl),serverTasks=[];
-            log('server ditemukan',servers.length,servers.map(function(x){return x.label;}).join(', '));
-            for(var z=0;z<servers.length;z++)(function(server){serverTasks.push(function(){return resolveServer(ctx,server);});})(servers[z]);
-            return runAll(serverTasks).then(function(v){log('stream berhasil',v.length);return v||[];});
-          });
-        });});
-      })(ranked[c]);
-      return runSeq(candidateTasks,function(v){return !!(v&&v.length);}).then(function(v){return v||[];});
-    });
-  }).catch(function(err){log('getStreams error',err&&err.message);return [];});
-}
-if(typeof module!=='undefined'&&module.exports)module.exports={getStreams:getStreams};
-else if(typeof exports!=='undefined')exports.getStreams=getStreams;
+// Host lain: cari m3u8/mp4 l
