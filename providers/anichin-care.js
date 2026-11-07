@@ -277,7 +277,9 @@ function tmdb(ctx, path, params) {
 
 function parseContentId(id) {
   var s = String(id == null ? '' : id).trim(), m;
-  if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };\n  if ((m = /^kitsu:(\d+)/i.exec(s))) return { kind: 'kitsu', id: m[1] };\n  if ((m = /^bangumi:(\d+)/i.exec(s))) return { kind: 'bangumi', id: m[1] };
+  if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };
+  if ((m = /^kitsu:(\d+)/i.exec(s))) return { kind: 'kitsu', id: m[1] };
+  if ((m = /^bangumi:(\d+)/i.exec(s))) return { kind: 'bangumi', id: m[1] };
   if ((m = /(tt\d+)/i.exec(s))) return { kind: 'imdb', id: m[1] };
   if (/^\d+$/.test(s)) return { kind: 'tmdb', id: s };
   return { kind: 'unknown', id: s };
