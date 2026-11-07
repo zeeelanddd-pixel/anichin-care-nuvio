@@ -7,7 +7,7 @@
  *
  * Alur: tmdbId -> judul (TMDB) -> cari halaman episode di anichin
  *       -> ambil daftar server (select.mirror berisi iframe base64)
- *       -> resolve embed (Okru / Dailymotion / Rumble / generik) -> m3u8/mp4.
+ *       -> resolve embed (Okru / Dailymotion / Rumble / DTube / Odysee / Vidara / VidHide / StreamRuby / generik) -> m3u8/mp4.
  *
  * Nuvio hanya bisa memutar URL media langsung (m3u8/mp4); URL halaman embed
  * (mis. https://ok.ru/videoembed/123) TIDAK bisa diputar, harus di-resolve dulu.
@@ -719,7 +719,7 @@ function resolveOdysee(ctx, url) {
 }
 
 function resolveDTube(ctx, url) {
-  var author = '', permlink = '', m = /#!\/([^/?#]+)\/([^/?#]+)/.exec(url);
+  var author = '', permlink = '', m = /#!\/(?:v\/)?([^/?#]+)\/([^/?#]+)/.exec(url);
   if (m) {
     author = decodeURIComponent(m[1]);
     permlink = decodeURIComponent(m[2]);
@@ -827,7 +827,7 @@ function resolveServer(ctx, srv) {
     p = resolveRumble(ctx, u);
   } else if (/(^|\.)(vidara\.(to|so)|vidaraa\.cc)$/.test(host)) {
     p = resolveVidara(ctx, u);
-  } else if (/(^|\.)(rubyvidhub\.com|streamruby\.[a-z]+|stm ruby\.[a-z]+)$/.test(host.replace(/ /g, ''))) {
+  } else if (/(^|\.)(rubyvidhub\.com|streamruby\.[a-z]+|stmruby\.[a-z]+)$/.test(host.replace(/ /g, ''))) {
     p = resolveStreamruby(ctx, u);
   } else if (/vidhide/.test(host)) {
     p = resolveVidHide(ctx, u);
