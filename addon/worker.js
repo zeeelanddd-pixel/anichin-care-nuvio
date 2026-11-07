@@ -19,10 +19,10 @@ const DEFAULT_SEARCH_TERMS = [
   "A Will Eternal",
   "The Kings Avatar",
   "Fog Hill of Five Elements",
-  "The Westward", "Chinese animation", "Chinese anime", "donghua series", "donghua movie",
+  "The Westward",
   "斗破苍穹", "斗罗大陆", "完美世界", "吞噬星空", "凡人修仙传",
   "仙逆", "一念永恒", "雾山五行", "西行纪", "灵笼", "眷思量",
-  "天官赐福", "魔道祖师", "全职高手", "时光代理人", "中国动画", "国产动画", "国创动画", "国漫", "中国动画电影", "中国动画剧集", "动画电影"
+  "天官赐福", "魔道祖师", "全职高手", "时光代理人", "国漫", "中国动画电影"
 ];
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
