@@ -39,7 +39,8 @@ Provider akan membaca pilihan server yang tersedia pada halaman episode, kemudia
 
 ## Fitur
 
-- Mencari judul melalui mekanisme pencarian Anichin dan endpoint pencarian WordPress jika tersedia.
+- Mencari judul melalui beberapa variasi nama TMDB dan endpoint pencarian WordPress jika tersedia.
+- Menggabungkan hasil dari seluruh variasi judul sebelum pemeringkatan, sehingga satu hasil pencarian kosong atau tidak cocok tidak menghentikan pencarian alias lainnya.
 - Mencocokkan hasil pencarian dengan metadata judul.
 - Mencari halaman episode yang sesuai untuk serial TV.
 - Membaca pilihan server video dari halaman episode.
