@@ -1,335 +1,422 @@
 /**
- * Donghua Catalog for Nuvio
- * Cloudflare Worker using the public Kitsu JSON:API.
+ * Donghua Catalog — Nuvio / Stremio addon
+ * Cloudflare Worker · AniList GraphQL · catalog + meta only (no streams)
  *
- * Catalog and metadata only. It does not provide video streams.
+ * Install after deploy:
+ *   https://YOUR-WORKER.workers.dev/manifest.json
  */
 
-const KITSU_API = "https://kitsu.io/api/edge";
-const BANGUMI_API = "https://api.bgm.tv/v0";
+const ANILIST = "https://graphql.anilist.co";
 const PAGE_SIZE = 20;
-const REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_SEARCH_TERMS = [
-  "donghua", "Soul Land", "Douluo Dalu", "Battle Through the Heavens",
-  "Doupo Cangqiong", "Perfect World", "Wanmei Shijie", "Swallowed Star",
-  "Tunshi Xingkong", "Renegade Immortal", "Xian Ni", "A Will Eternal",
-  "Yi Nian Yong Heng", "The King's Avatar", "Quanzhi Gaoshou",
-  "Fog Hill of Five Elements", "Wu Shan Wu Xing", "The Westward",
-  "Link Click", "Shiguang Dailiren", "Heaven Official's Blessing",
-  "Tian Guan Ci Fu", "Spirit Cage", "Scissor Seven"
-];
-const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
-const CATALOGS = [
-  { type: "series", id: "donghua-series", name: "Donghua Series" },
-  { type: "movie", id: "donghua-movies", name: "Donghua Movies" }
-];
+const TIMEOUT_MS = 12000;
+const VERSION = "2.0.0";
 
 const MANIFEST = {
-  id: "community.donghua.catalog",
-  version: "1.1.0",
+  id: "community.donghua.anilist.catalog",
+  version: VERSION,
   name: "Donghua Catalog",
-  description: "Katalog donghua dari Kitsu dan Bangumi, mencakup serial, ONA, OVA, special, dan film. Metadata saja, tanpa streaming.",
-  resources: ["catalog", "meta"],
+  description:
+    "Katalog donghua (animasi China) dari AniList: serial, ONA, OVA, special, dan film. Metadata saja — tanpa streaming.",
+  logo: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx120220-sdm29OEAijm7.jpg",
+  resources: [
+    "catalog",
+    {
+      name: "meta",
+      types: ["series", "movie"],
+      idPrefixes: ["anilist:"],
+    },
+  ],
   types: ["series", "movie"],
-  idPrefixes: ["kitsu:", "bangumi:"],
-  catalogs: CATALOGS.map((catalog) => ({
-    type: catalog.type,
-    id: catalog.id,
-    name: catalog.name,
-    extra: [
-      { name: "search", isRequired: false },
-      { name: "skip", isRequired: false }
-    ]
-  }))
+  idPrefixes: ["anilist:"],
+  catalogs: [
+    {
+      type: "series",
+      id: "donghua-trending",
+      name: "Donghua Trending",
+      extra: [
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false },
+      ],
+    },
+    {
+      type: "series",
+      id: "donghua-series",
+      name: "Donghua Series",
+      extra: [
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false },
+      ],
+    },
+    {
+      type: "movie",
+      id: "donghua-movies",
+      name: "Donghua Movies",
+      extra: [
+        { name: "search", isRequired: false },
+        { name: "skip", isRequired: false },
+      ],
+    },
+  ],
+  behaviorHints: {
+    adult: false,
+    p2pNotSupported: true,
+    configurable: false,
+  },
 };
 
-function json(data, status = 200) {
+function corsHeaders(extra = {}) {
+  return {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    ...extra,
+  };
+}
+
+function json(data, status = 200, cacheSeconds = 300) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "access-control-allow-origin": "*",
-      "cache-control": "public, max-age=300"
-    }
+    headers: corsHeaders({
+      "cache-control": "public, max-age=" + cacheSeconds,
+    }),
   });
 }
 
-async function kitsuRequest(path) {
+async function anilist(query, variables) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response;
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    response = await fetch(KITSU_API + path, {
-    signal: controller.signal,
-    headers: {
-      "accept": "application/vnd.api+json",
-      "user-agent": "Nuvio-Donghua-Catalog/1.1.0"
-    }
+    const res = await fetch(ANILIST, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        "user-agent": "DonghuaCatalog/" + VERSION,
+      },
+      body: JSON.stringify({ query, variables }),
     });
+    if (res.status === 429) throw new Error("AniList rate limit. Coba lagi sebentar.");
+    if (!res.ok) throw new Error("AniList HTTP " + res.status);
+    const body = await res.json();
+    if (!body.data) {
+      const msg = (body.errors && body.errors[0] && body.errors[0].message) || "AniList kosong";
+      throw new Error(msg);
+    }
+    return body.data;
   } finally {
     clearTimeout(timer);
   }
+}
 
-  const text = await response.text();
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error("Kitsu returned an unreadable response (HTTP " + response.status + ")");
+function latinTitle(title) {
+  if (!title) return "Untitled";
+  const en = (title.english || "").trim();
+  const ro = (title.romaji || "").trim();
+  return en || ro || (title.native || "").trim() || "Untitled";
+}
+
+function plainText(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case "FINISHED":
+      return "Finished";
+    case "RELEASING":
+      return "Airing";
+    case "NOT_YET_RELEASED":
+      return "Upcoming";
+    case "CANCELLED":
+      return "Cancelled";
+    case "HIATUS":
+      return "Hiatus";
+    default:
+      return status || "";
   }
-
-  if (!response.ok) {
-    const message = payload.errors?.map((item) => item.detail || item.title).join("; ")
-      || "Kitsu returned HTTP " + response.status;
-    throw new Error(message);
-  }
-  return payload;
 }
 
-function isLatinTitle(value) {
-  return typeof value === "string" && /[A-Za-z]/.test(value)
-    && !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(value);
-}
-function titleOf(attributes) {
-  const titles = attributes.titles || {};
-  const candidates = [titles.en, titles.en_jp, attributes.canonicalTitle, titles.ja_jp];
-  for (const value of candidates) if (isLatinTitle(value)) return value.trim();
-  return "";
+function isMovieFormat(format) {
+  return format === "MOVIE";
 }
 
-function posterOf(attributes) {
-  return attributes.posterImage?.original
-    || attributes.posterImage?.large
-    || attributes.posterImage?.medium
-    || null;
+function stremioType(format) {
+  return isMovieFormat(format) ? "movie" : "series";
 }
 
-function toMetaPreview(item, type) {
-  const a = item.attributes || {};
+function releaseInfo(node) {
+  const year = node.seasonYear || (node.startDate && node.startDate.year) || null;
+  if (!year) return undefined;
+  if (isMovieFormat(node.format)) return String(year);
+  if (node.status === "RELEASING" || node.status === "NOT_YET_RELEASED") return year + "-";
+  const end = node.endDate && node.endDate.year;
+  if (end && end !== year) return year + "-" + end;
+  return String(year);
+}
+
+function toPreview(node) {
+  const type = stremioType(node.format);
+  const year = node.seasonYear || (node.startDate && node.startDate.year) || null;
+  const score = node.averageScore != null ? (node.averageScore / 10).toFixed(1) : null;
   return {
-    id: "kitsu:" + item.id,
+    id: "anilist:" + node.id,
     type,
-    name: titleOf(a),
-    poster: posterOf(a),
+    name: latinTitle(node.title),
+    poster: (node.coverImage && (node.coverImage.extraLarge || node.coverImage.large)) || null,
     posterShape: "poster",
-    description: [
-      a.startDate ? a.startDate.slice(0, 4) : "",
-      a.subtype || "",
-      a.episodeCount ? a.episodeCount + " episodes" : "",
-      a.status || ""
-    ].filter(Boolean).join(" • ") || "Donghua metadata from Kitsu."
+    background: node.bannerImage || null,
+    description: plainText(node.description).slice(0, 280) || undefined,
+    releaseInfo: year ? String(year) : undefined,
+    imdbRating: score || undefined,
+    genres: node.genres || undefined,
   };
 }
 
-async function searchKitsu(term, subtype, offset) {
-  const params = new URLSearchParams();
-  params.set("filter[text]", term);
-  params.set("filter[subtype]", subtype);
-  params.set("page[limit]", String(PAGE_SIZE));
-  params.set("page[offset]", String(offset));
-  params.set("sort", "-userCount");
-  return kitsuRequest("/anime?" + params.toString());
-}
-
-async function bangumiRequest(path, body) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response;
-  try {
-    response = await fetch(BANGUMI_API + path, {
-    signal: controller.signal,
-    method: body ? "POST" : "GET",
-    headers: {
-      "accept": "application/json",
-      "content-type": "application/json",
-      "user-agent": "DonghuaCatalog/1.0.0 (github.com/zeeelanddd-pixel/anichin-care-nuvio)"
-    },
-    body: body ? JSON.stringify(body) : undefined
+function buildVideos(node) {
+  if (isMovieFormat(node.format)) return undefined;
+  const count = Math.min(Number(node.episodes) || 0, 500);
+  if (count <= 0) {
+    return [
+      {
+        id: "anilist:" + node.id + ":1:1",
+        title: "Episode 1",
+        season: 1,
+        episode: 1,
+      },
+    ];
+  }
+  const videos = [];
+  for (let i = 1; i <= count; i++) {
+    videos.push({
+      id: "anilist:" + node.id + ":1:" + i,
+      title: "Episode " + i,
+      season: 1,
+      episode: i,
     });
-  } finally {
-    clearTimeout(timer);
   }
-  const text = await response.text();
-  let payload;
-  try { payload = JSON.parse(text); }
-  catch { throw new Error("Bangumi returned unreadable JSON (HTTP " + response.status + ")"); }
-  if (!response.ok) throw new Error("Bangumi returned HTTP " + response.status);
-  return payload;
+  return videos;
 }
 
-async function searchBangumi(term) {
-  return bangumiRequest("/search/subjects?limit=20&offset=0", {
-    keyword: term,
-    sort: "heat",
-    filter: { type: [2], nsfw: false }
-  });
-}
+function toMeta(node) {
+  const type = stremioType(node.format);
+  const score = node.averageScore != null ? (node.averageScore / 10).toFixed(1) : null;
+  const studio =
+    node.studios &&
+    node.studios.nodes &&
+    node.studios.nodes[0] &&
+    node.studios.nodes[0].name;
 
-function bangumiItemType(item) {
-  const value = String(item.platform || "") + " " + String(item.name || "") + " " + String(item.name_cn || "");
-  return /movie|film|theatrical/i.test(value) ? "movie" : "series";
-}
+  const bits = [
+    plainText(node.description),
+    node.format ? "Format: " + node.format : "",
+    statusLabel(node.status) ? "Status: " + statusLabel(node.status) : "",
+    node.episodes ? "Episodes: " + node.episodes : "",
+    node.duration ? "Runtime: " + node.duration + " min" : "",
+    studio ? "Studio: " + studio : "",
+  ].filter(Boolean);
 
-function bangumiPoster(item) {
-  const images = item.images || {};
-  return images.large || images.medium || images.common || images.small || null;
-}
-
-function toBangumiPreview(item) {
-  const year = item.date ? String(item.date).slice(0, 4) : "";
-  const episodes = item.eps || item.total_episodes || "";
   return {
-    id: "bangumi:" + item.id,
-    type: bangumiItemType(item),
-    name: isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""),
-    poster: bangumiPoster(item),
+    id: "anilist:" + node.id,
+    type,
+    name: latinTitle(node.title),
+    poster: (node.coverImage && (node.coverImage.extraLarge || node.coverImage.large)) || null,
     posterShape: "poster",
-    description: [year, item.platform || "", episodes ? episodes + " episodes" : "", item.score ? "rating " + item.score : ""].filter(Boolean).join(" • ") || "Metadata from Bangumi."
-  };
-}
-
-function normalizedTitle(value) {
-  return String(value || "").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-async function getCatalog(type, params) {
-  const search = (params.get("search") || "").trim();
-  const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
-  const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
-  const kitsuTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
-  const bangumiTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
-  const pair = await Promise.all([
-    Promise.all(kitsuTerms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))),
-    Promise.all(bangumiTerms.map((term) => searchBangumi(term).catch(() => ({ data: [] }))))
-  ]);
-  const kitsuMap = new Map();
-  for (const result of pair[0]) {
-    for (const item of (result.data || [])) if (!kitsuMap.has(String(item.id))) kitsuMap.set(String(item.id), item);
-  }
-  const bangumiMap = new Map();
-  for (const result of pair[1]) {
-    for (const item of (result.data || [])) {
-      if (!item || !item.id || bangumiItemType(item) !== type) continue;
-      if (!bangumiMap.has(String(item.id))) bangumiMap.set(String(item.id), item);
-    }
-  }
-  const kitsuItems = Array.from(kitsuMap.values()).sort((a, b) => Number(b.attributes?.userCount || 0) - Number(a.attributes?.userCount || 0));
-  const bangumiItems = Array.from(bangumiMap.values()).sort((a, b) => Number(b.collection?.collect || b.collection_total || 0) - Number(a.collection?.collect || a.collection_total || 0));
-  const merged = [];
-  const seen = new Set();
-  const max = Math.max(kitsuItems.length, bangumiItems.length);
-  for (let i = 0; i < max; i++) {
-    const candidates = [kitsuItems[i], bangumiItems[i]];
-    for (const item of candidates) {
-      if (!item) continue;
-      const isKitsu = !!item.attributes;
-      const title = isKitsu ? titleOf(item.attributes) : (isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""));
-      const year = isKitsu ? String(item.attributes.startDate || "").slice(0, 4) : String(item.date || "").slice(0, 4);
-      const key = normalizedTitle(title) + "|" + year + "|" + type;
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(isKitsu ? toMetaPreview(item, type) : toBangumiPreview(item));
-    }
-  }
-  return { metas: merged.slice(skip, skip + PAGE_SIZE) };
-}
-async function getMeta(type, rawId) {
-  if (rawId.indexOf("bangumi:") === 0) {
-    const id = rawId.replace(/^bangumi:/, "");
-    if (!/^\d+$/.test(id)) return { meta: null };
-    const payload = await bangumiRequest("/subjects/" + encodeURIComponent(id));
-    const item = payload.data || payload;
-    if (!item || !item.id) return { meta: null };
-    const details = [
-      item.summary || "",
-      item.date ? "Release date: " + item.date : "",
-      item.platform ? "Format: " + item.platform : "",
-      item.eps ? "Episodes: " + item.eps : "",
-      item.score ? "Rating: " + item.score : ""
-    ].filter(Boolean).join("\n\n");
-    return { meta: {
-      id: "bangumi:" + item.id,
-      type: bangumiItemType(item),
-      name: isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""),
-      poster: bangumiPoster(item),
-      posterShape: "poster",
-      description: details,
-      links: [{ name: "Bangumi", category: "Source", url: "https://bgm.tv/subject/" + item.id }]
-    } };
-  }
-  const id = rawId.replace(/^kitsu:/, "");
-  if (!/^\d+$/.test(id)) return { meta: null };
-
-  const payload = await kitsuRequest("/anime/" + encodeURIComponent(id));
-  const item = payload.data;
-  if (!item) return { meta: null };
-
-  const a = item.attributes || {};
-  const details = [
-    a.synopsis || "",
-    a.startDate ? "Start date: " + a.startDate : "",
-    a.endDate ? "End date: " + a.endDate : "",
-    a.subtype ? "Format: " + a.subtype : "",
-    a.episodeCount ? "Episodes: " + a.episodeCount : "",
-    a.status ? "Status: " + a.status : "",
-    a.averageRating ? "Rating: " + a.averageRating : ""
-  ].filter(Boolean).join("\n\n");
-
-  return {
-    meta: {
-      id: "kitsu:" + item.id,
-      type,
-      name: titleOf(a),
-      poster: posterOf(a),
-      posterShape: "poster",
-      description: details,
-      links: a.slug ? [{
-        name: "Kitsu",
+    background: node.bannerImage || null,
+    description: bits.join("\n\n"),
+    releaseInfo: releaseInfo(node),
+    imdbRating: score || undefined,
+    genres: node.genres || undefined,
+    runtime: node.duration ? node.duration + " min" : undefined,
+    country: "China",
+    website: node.siteUrl || undefined,
+    videos: buildVideos(node),
+    links: [
+      {
+        name: "AniList",
         category: "Source",
-        url: "https://kitsu.io/anime/" + a.slug
-      }] : undefined
-    }
+        url: node.siteUrl || "https://anilist.co/anime/" + node.id,
+      },
+    ],
   };
+}
+
+const CARD_FIELDS = `
+  id
+  idMal
+  siteUrl
+  title { romaji english native }
+  format
+  episodes
+  duration
+  status
+  seasonYear
+  startDate { year }
+  endDate { year }
+  averageScore
+  coverImage { large extraLarge }
+  bannerImage
+  description(asHtml: false)
+  genres
+  studios(isMain: true) { nodes { name } }
+`;
+
+function catalogSort(catalogId) {
+  if (catalogId === "donghua-trending") return "TRENDING_DESC";
+  return "POPULARITY_DESC";
+}
+
+function formatIn(type) {
+  if (type === "movie") return ["MOVIE"];
+  return ["TV", "ONA", "OVA", "SPECIAL"];
+}
+
+async function getCatalog(type, catalogId, searchParams) {
+  const search = (searchParams.get("search") || "").trim().slice(0, 80);
+  const skip = Math.max(0, parseInt(searchParams.get("skip") || "0", 10) || 0);
+  const page = Math.floor(skip / PAGE_SIZE) + 1;
+  const sort = catalogSort(catalogId);
+  const formats = formatIn(type);
+
+  const query = search
+    ? `query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $formatIn: [MediaFormat]) {
+        Page(page: $page, perPage: $perPage) {
+          media(
+            countryOfOrigin: "CN"
+            type: ANIME
+            search: $search
+            sort: $sort
+            format_in: $formatIn
+            isAdult: false
+          ) { ${CARD_FIELDS} }
+        }
+      }`
+    : `query ($page: Int, $perPage: Int, $sort: [MediaSort], $formatIn: [MediaFormat]) {
+        Page(page: $page, perPage: $perPage) {
+          media(
+            countryOfOrigin: "CN"
+            type: ANIME
+            sort: $sort
+            format_in: $formatIn
+            isAdult: false
+          ) { ${CARD_FIELDS} }
+        }
+      }`;
+
+  const variables = {
+    page,
+    perPage: PAGE_SIZE,
+    sort: [sort],
+    formatIn: formats,
+  };
+  if (search) variables.search = search;
+
+  const data = await anilist(query, variables);
+  const media = (data.Page && data.Page.media) || [];
+  const metas = media
+    .filter((node) => node && stremioType(node.format) === type)
+    .map(toPreview);
+
+  return { metas };
+}
+
+async function getMeta(type, rawId) {
+  const idStr = String(rawId || "").replace(/^anilist:/i, "");
+  if (!/^\d+$/.test(idStr)) return { meta: null };
+  const id = Number(idStr);
+
+  const data = await anilist(
+    `query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        ${CARD_FIELDS}
+        countryOfOrigin
+      }
+    }`,
+    { id }
+  );
+
+  const node = data.Media;
+  if (!node || node.countryOfOrigin !== "CN") return { meta: null };
+  if (stremioType(node.format) !== type) {
+    // still return meta so the client can show the title
+  }
+  return { meta: toMeta(node) };
 }
 
 export default {
   async fetch(request) {
-    const url = new URL(request.url);
-
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET, OPTIONS",
-          "access-control-allow-headers": "content-type"
-        }
+      return new Response(null, { headers: corsHeaders() });
+    }
+
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+
+    if (path === "/" || path === "") {
+      return json({
+        addon: MANIFEST.name,
+        version: MANIFEST.version,
+        status: "ok",
+        message: "Pasang lewat /manifest.json di Nuvio (Settings → Addons).",
       });
     }
 
-    if (url.pathname === "/manifest.json") return json(MANIFEST);
+    if (path === "/manifest.json") {
+      return json(MANIFEST, 200, 3600);
+    }
 
-    const catalog = url.pathname.match(/^\/catalog\/(series|movie)\/([^/]+)\.json$/);
-    if (catalog) {
+    // /catalog/{type}/{id}.json or /catalog/{type}/{id}/skip=N.json or with extra path segments
+    const catalogMatch = path.match(
+      /^\/catalog\/(series|movie)\/([^/]+)(?:\/([^/]+))?\.json$/
+    );
+    if (catalogMatch) {
+      const type = catalogMatch[1];
+      const catalogId = catalogMatch[2];
+      const extra = catalogMatch[3] || "";
+      const params = new URLSearchParams(url.search);
+      // Stremio sometimes encodes extras in the path: skip=20 or search=foo
+      if (extra) {
+        for (const part of extra.split("&")) {
+          const eq = part.indexOf("=");
+          if (eq > 0) {
+            params.set(
+              decodeURIComponent(part.slice(0, eq)),
+              decodeURIComponent(part.slice(eq + 1))
+            );
+          }
+        }
+      }
       try {
-        return json(await getCatalog(catalog[1], url.searchParams));
-      } catch (error) {
-        return json({ metas: [], error: String(error.message || error) }, 502);
+        return json(await getCatalog(type, catalogId, params), 200, 300);
+      } catch (err) {
+        return json({ metas: [], error: String(err.message || err) }, 502, 30);
       }
     }
 
-    const meta = url.pathname.match(/^\/meta\/(series|movie)\/(.+)\.json$/);
-    if (meta) {
+    const metaMatch = path.match(/^\/meta\/(series|movie)\/(.+)\.json$/);
+    if (metaMatch) {
       try {
-        return json(await getMeta(meta[1], decodeURIComponent(meta[2])));
-      } catch (error) {
-        return json({ meta: null, error: String(error.message || error) }, 502);
+        const id = decodeURIComponent(metaMatch[2]);
+        return json(await getMeta(metaMatch[1], id), 200, 600);
+      } catch (err) {
+        return json({ meta: null, error: String(err.message || err) }, 502, 30);
       }
     }
 
-    return json({
-      addon: MANIFEST.name,
-      status: "ok",
-      message: "Gunakan /manifest.json untuk memasang addon."
-    });
-  }
+    return json({ error: "Not found", path }, 404, 60);
+  },
 };
+                                 
