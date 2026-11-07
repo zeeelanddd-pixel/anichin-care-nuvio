@@ -131,3 +131,14 @@ Pengguna bertanggung jawab untuk mematuhi hukum, ketentuan layanan, dan hak cipt
 **Repository:** [zeeelanddd-pixel/anichin-care-nuvio](https://github.com/zeeelanddd-pixel/anichin-care-nuvio)
 
 **Status proyek:** Unofficial community-made provider for Nuvio.
+
+
+## Anichin Catalog Addon (Cloudflare Workers)
+
+Repository ini juga memiliki addon katalog terpisah di folder `addon/`.
+
+- Source Worker: [addon/worker.js](addon/worker.js)
+- Konfigurasi Wrangler: [addon/wrangler.toml](addon/wrangler.toml)
+- Panduan deployment: [addon/README.md](addon/README.md)
+
+Addon ini menggunakan protokol Stremio agar katalog dan metadata Anichin dapat dibaca Nuvio. Tahap awal masih eksperimental dan belum menyediakan playback mandiri. Integrasi ID katalog dengan provider Anichin Care harus diselesaikan serta diuji sebelum dinyatakan siap digunakan.
