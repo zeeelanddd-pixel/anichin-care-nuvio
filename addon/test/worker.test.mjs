@@ -49,7 +49,7 @@ test("manifest exposes Stremio-compatible catalog and metadata resources", async
   const response = await worker.fetch(new Request("https://addon.test/manifest.json"));
   const manifest = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(manifest.version, "1.0.0");
+  assert.equal(manifest.version, "1.1.0");
   assert.deepEqual(manifest.resources, ["catalog", "meta"]);
   assert.deepEqual(manifest.idPrefixes, ["kitsu:", "bangumi:"]);
   assert.equal(manifest.catalogs.length, 2);
