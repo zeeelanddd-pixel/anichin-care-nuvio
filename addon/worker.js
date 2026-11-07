@@ -7,6 +7,16 @@
 
 const KITSU_API = "https://kitsu.io/api/edge";
 const PAGE_SIZE = 20;
+// Exclude known false positives returned by Kitsu text search.
+const EXCLUDED_IDS = new Set([
+  "49575", // Pokemon Animated Pokedex: Eevee
+  "49576", // Pokemon Animated Pokedex: Resting on the Island
+  "7171",  // Taekwon Dongja Maruchi Arachi (Korean animation)
+  "43160", // The Haunted House: The Secret of the Cave (Korean animation)
+  "48862", // Honkai: Star Rail promotional animation
+  "51099", // Honkai Impact 3rd promotional animation
+  "51103"  // Honkai: Star Rail promotional animation
+]);
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
   { type: "series", id: "donghua-series", name: "Donghua Series" },
@@ -15,9 +25,9 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "0.4.0",
+  version: "0.5.0",
   name: "Donghua Catalog",
-  description: "Katalog donghua berbasis pencarian Kitsu. Tidak menyediakan streaming.",
+  description: "Katalog donghua dari Kitsu dengan penyaringan judul yang diketahui tidak relevan. Tidak menyediakan streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
   idPrefixes: ["kitsu:"],
@@ -119,6 +129,7 @@ async function getCatalog(type, params) {
   for (const term of terms) {
     const result = await searchKitsu(term, subtype, skip);
     for (const item of (result.data || [])) {
+      if (EXCLUDED_IDS.has(String(item.id))) continue;
       if (!collected.has(item.id)) collected.set(item.id, item);
     }
   }
