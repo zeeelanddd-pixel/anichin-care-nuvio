@@ -6,6 +6,7 @@
  */
 
 const KITSU_API = "https://kitsu.io/api/edge";
+const BANGUMI_API = "https://api.bgm.tv/v0";
 const PAGE_SIZE = 20;
 const DEFAULT_SEARCH_TERMS = [
   "donghua",
@@ -37,12 +38,12 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "0.6.0",
+  version: "0.7.0",
   name: "Donghua Catalog",
-  description: "Katalog donghua multi-pencarian dari Kitsu dengan penggabungan dan deduplikasi judul. Tidak menyediakan streaming.",
+  description: "Katalog multi-sumber Kitsu dan Bangumi untuk memperluas cakupan donghua, series, dan movie. Tidak menyediakan streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
-  idPrefixes: ["kitsu:"],
+  idPrefixes: ["kitsu:", "bangumi:"],
   catalogs: CATALOGS.map((catalog) => ({
     type: catalog.type,
     id: catalog.id,
