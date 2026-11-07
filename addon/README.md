@@ -1,37 +1,58 @@
-# Anichin Catalog for Nuvio
+# Donghua Catalog for Nuvio
 
-Addon komunitas tidak resmi yang membaca daftar judul dan metadata publik dari Anichin untuk ditampilkan di Nuvio melalui protokol Stremio.
+Addon katalog komunitas untuk Nuvio yang menggabungkan metadata anime/donghua dari **Kitsu** dan **Bangumi** melalui protokol Stremio.
 
-## Status saat ini
+## Status versi 1.0.0
 
-**Tahap 1: katalog dan metadata (eksperimental).**
+Addon ini menyediakan **katalog dan metadata**, bukan video atau layanan streaming.
 
-- Katalog serial/donghua dan film.
-- Pagination dasar melalui parameter `skip`.
-- Pencarian judul melalui pencarian situs.
-- Metadata halaman judul dan daftar episode jika pola URL episode terdeteksi.
-- Tidak meng-host atau mem-proxy file video.
+- Katalog serial: TV, ONA, OVA, dan special.
+- Katalog film.
+- Sumber metadata: Kitsu dan Bangumi.
+- Pencarian judul melalui parameter `search`.
+- Pagination melalui parameter `skip`.
+- Dedup dasar lintas sumber berdasarkan judul, tahun, dan tipe.
+- ID metadata menggunakan prefix `kitsu:` dan `bangumi:`.
+- Timeout permintaan sumber untuk menghindari request menggantung.
 
-Stream playback belum diaktifkan pada tahap ini. ID katalog memakai prefix `anichin:`, sehingga integrasi dengan provider Anichin Care perlu diuji dan diselesaikan sebelum addon dinyatakan siap dipakai untuk menonton.
-
-## Deploy ke Cloudflare Workers
-
-1. Buat akun Cloudflare.
-2. Buka Workers & Pages, lalu buat Worker bernama `anichin-catalog-nuvio`.
-3. Salin isi `worker.js` ke editor Worker, lalu deploy.
-4. Uji URL `https://NAMA-WORKER.NAMA-AKUN.workers.dev/manifest.json`.
-5. Masukkan URL tersebut ke Settings > Addons di Nuvio.
-
-File `wrangler.toml` disediakan untuk deployment menggunakan Wrangler CLI.
+Cakupan katalog bergantung pada data publik kedua layanan. Tidak ada jaminan semua donghua pernah terindeks atau selalu muncul. Judul anime Jepang dan animasi Korea dapat ikut muncul karena filter sumber tidak selalu dapat membedakan asal produksi secara sempurna.
 
 ## Endpoint
 
 - `GET /manifest.json`
-- `GET /catalog/series/anichin-series.json?skip=0`
-- `GET /catalog/movie/anichin-movies.json?skip=0`
-- `GET /meta/series/anichin:slug.json`
-- `GET /meta/movie/anichin:slug.json`
+- `GET /catalog/series/donghua-series.json?skip=0`
+- `GET /catalog/movie/donghua-movies.json?skip=0`
+- `GET /catalog/series/donghua-series.json?search=Soul%20Land`
+- `GET /meta/series/kitsu:1234.json`
+- `GET /meta/series/bangumi:1234.json`
 
-## Catatan
+## Deploy ke Cloudflare Workers
 
-Struktur halaman Anichin dapat berubah. Parsing katalog dan episode harus diuji ulang jika situs mengubah HTML, pagination, atau pola URL. Gunakan hanya sesuai hukum dan ketentuan yang berlaku.
+Worker yang sudah terhubung ke repository ini dapat diperbarui dengan menyalin isi `worker.js` ke editor Worker lalu menekan Deploy. Jika menggunakan Wrangler CLI:
+
+```sh
+cd addon
+npm test
+npx wrangler deploy
+```
+
+Pastikan URL Worker berakhir dengan `/manifest.json` dapat dibuka sebelum memasukkannya ke Nuvio melalui Settings → Addons.
+
+## Pengujian lokal
+
+Membutuhkan Node.js 18 atau lebih baru.
+
+```sh
+cd addon
+npm test
+```
+
+Tes memakai mock response sehingga memeriksa routing, bentuk manifest, pemetaan hasil Kitsu/Bangumi, pemisahan series/movie, dan metadata tanpa membebani API publik.
+
+## Catatan dan batasan
+
+- Kitsu dan Bangumi adalah sumber metadata, bukan sumber stream.
+- Pencarian multi-kata kunci memperluas jangkauan, tetapi tidak berarti katalog lengkap 100%.
+- Klasifikasi movie Bangumi memakai informasi platform/judul dan dapat memiliki kasus ambigu.
+- Ketersediaan poster, judul alternatif, tahun, dan ringkasan bergantung pada data sumber.
+- Addon ini tidak mencoba melewati proteksi, login, atau pembatasan akses situs mana pun.
