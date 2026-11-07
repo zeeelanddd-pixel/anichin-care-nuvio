@@ -883,7 +883,7 @@ function getStreams(tmdbId,mediaType,season,episode){
       tasks.push(function(){var url=ctx.base+'/?s='+encodeURIComponent(q.replace(/-/g,' '));return getHtml(ctx,url,ctx.base+'/').then(function(r){return r?parseCards(r.text,r.url||url):[];});});
       tasks.push(function(){var url=ctx.base+'/wp-json/wp/v2/search?search='+encodeURIComponent(q.replace(/-/g,' '))+'&per_page=10';return getJson(ctx,url,{referer:ctx.base+'/'}).then(function(j){var a=[];if(j&&j.length)for(var k=0;k<j.length;k++)if(j[k]&&j[k].url&&j[k].title&&j[k].title.rendered)a.push({url:j[k].url,title:decodeEntities(j[k].title.rendered.replace(/<[^>]+>/g,' '))});return a;});});
     })(queries[i]);
-    return runSeq(tasks,function(v){return !!(v&&v.length);}).then(function(cards){
+    return runAll(tasks).then(function(cards){
       var ranked=rankCandidates(cards||[],ctx.titles,s),candidateTasks=[];
       for(var c=0;c<Math.min(ranked.length,4);c++)(function(candidate){
         candidateTasks.push(function(){return getHtml(ctx,candidate.url,ctx.base+'/').then(function(page){
