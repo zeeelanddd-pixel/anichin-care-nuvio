@@ -8,6 +8,7 @@
 const KITSU_API = "https://kitsu.io/api/edge";
 const BANGUMI_API = "https://api.bgm.tv/v0";
 const PAGE_SIZE = 20;
+const REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_SEARCH_TERMS = [
   "donghua",
   "Soul Land",
@@ -18,10 +19,10 @@ const DEFAULT_SEARCH_TERMS = [
   "A Will Eternal",
   "The Kings Avatar",
   "Fog Hill of Five Elements",
-  "The Westward",
+  "The Westward", "Chinese animation", "Chinese anime", "donghua series", "donghua movie",
   "斗破苍穹", "斗罗大陆", "完美世界", "吞噬星空", "凡人修仙传",
   "仙逆", "一念永恒", "雾山五行", "西行纪", "灵笼", "眷思量",
-  "天官赐福", "魔道祖师", "全职高手", "时光代理人"
+  "天官赐福", "魔道祖师", "全职高手", "时光代理人", "中国动画", "国产动画", "国创动画", "国漫", "中国动画电影", "中国动画剧集", "动画电影"
 ];
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
@@ -31,9 +32,9 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "0.7.0",
+  version: "1.0.0",
   name: "Donghua Catalog",
-  description: "Katalog multi-sumber Kitsu dan Bangumi untuk memperluas cakupan donghua, series, dan movie. Tidak menyediakan streaming.",
+  description: "Katalog multi-sumber Katalog donghua multi-sumber dari Kitsu dan Bangumi, mencakup serial, ONA, OVA, special, dan film. Metadata saja, tanpa streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
   idPrefixes: ["kitsu:", "bangumi:"],
@@ -60,12 +61,20 @@ function json(data, status = 200) {
 }
 
 async function kitsuRequest(path) {
-  const response = await fetch(KITSU_API + path, {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(KITSU_API + path, {
+    signal: controller.signal,
     headers: {
       "accept": "application/vnd.api+json",
-      "user-agent": "Nuvio-Donghua-Catalog/0.4"
+      "user-agent": "Nuvio-Donghua-Catalog/1.0.0"
     }
-  });
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = await response.text();
   let payload;
@@ -85,7 +94,7 @@ async function kitsuRequest(path) {
 
 function titleOf(attributes) {
   const titles = attributes.titles || {};
-  return titles.en || titles.en_jp || titles.ja_jp
+  return titles.en || titles.en_jp || titles.zh_cn || titles.zh || titles.ja_jp
     || attributes.canonicalTitle || "Untitled";
 }
 
@@ -124,15 +133,23 @@ async function searchKitsu(term, subtype, offset) {
 }
 
 async function bangumiRequest(path, body) {
-  const response = await fetch(BANGUMI_API + path, {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(BANGUMI_API + path, {
+    signal: controller.signal,
     method: body ? "POST" : "GET",
     headers: {
       "accept": "application/json",
       "content-type": "application/json",
-      "user-agent": "DonghuaCatalog/0.7.0 (github.com/zeeelanddd-pixel/anichin-care-nuvio)"
+      "user-agent": "DonghuaCatalog/1.0.0 (github.com/zeeelanddd-pixel/anichin-care-nuvio)"
     },
     body: body ? JSON.stringify(body) : undefined
-  });
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let payload;
   try { payload = JSON.parse(text); }
@@ -181,7 +198,7 @@ async function getCatalog(type, params) {
   const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
   const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
   const kitsuTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
-  const bangumiTerms = search ? [search] : ["国创", "国漫", "国产动画", "中国动画", "中国动画电影", "斗罗大陆", "斗破苍穹", "凡人修仙传"];
+  const bangumiTerms = search ? [search] : ["国创", "国漫", "国产动画", "中国动画", "中国动画电影", "中国动画剧集", "动画电影", "斗罗大陆", "斗破苍穹", "凡人修仙传", "灵笼", "眷思量", "雾山五行", "西行纪", "天官赐福", "魔道祖师", "全职高手", "时光代理人"];
   const pair = await Promise.all([
     Promise.all(kitsuTerms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))),
     Promise.all(bangumiTerms.map((term) => searchBangumi(term).catch(() => ({ data: [] }))))
