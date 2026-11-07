@@ -28,7 +28,7 @@ const MANIFEST = {
   id: "community.donghua.catalog",
   version: "1.1.0",
   name: "Donghua Catalog",
-  description: "Katalog multi-sumber Katalog donghua multi-sumber dari Kitsu dan Bangumi, mencakup serial, ONA, OVA, special, dan film. Metadata saja, tanpa streaming.",
+  description: "Katalog donghua dari Kitsu dan Bangumi, mencakup serial, ONA, OVA, special, dan film. Metadata saja, tanpa streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
   idPrefixes: ["kitsu:", "bangumi:"],
