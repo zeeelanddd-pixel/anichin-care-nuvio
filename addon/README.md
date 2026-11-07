@@ -13,7 +13,7 @@ Addon ini menyediakan **katalog dan metadata**, bukan video atau layanan streami
 - Pagination melalui parameter `skip`.
 - Dedup dasar lintas sumber berdasarkan judul, tahun, dan tipe.
 - ID metadata menggunakan prefix `kitsu:` dan `bangumi:`.
-- Timeout permintaan sumber untuk menghindari request menggantung.
+- Timeout permintaan sumber untuk menghindari request menggantung.\n- Maksimal 45 permintaan sumber pada katalog default, dengan ruang untuk redirect agar tetap di bawah batas subrequest paket Cloudflare Free.
 
 Cakupan katalog bergantung pada data publik kedua layanan. Tidak ada jaminan semua donghua pernah terindeks atau selalu muncul. Judul anime Jepang dan animasi Korea dapat ikut muncul karena filter sumber tidak selalu dapat membedakan asal produksi secara sempurna.
 
@@ -36,7 +36,7 @@ npm test
 npx wrangler deploy
 ```
 
-Pastikan URL Worker berakhir dengan `/manifest.json` dapat dibuka sebelum memasukkannya ke Nuvio melalui Settings → Addons.
+Worker yang sudah dibuat untuk proyek ini menggunakan URL manifest berikut:\n\n`https://anichin-catalog-nuvio.zeeelanddd.workers.dev/manifest.json`\n\nSetelah kode Worker diperbarui dan di-deploy, buka URL manifest tersebut untuk memastikan statusnya normal, lalu tambahkan URL itu di Nuvio melalui Settings → Addons. Jangan membuat Worker baru jika Worker lama masih digunakan.
 
 ## Pengujian lokal
 
