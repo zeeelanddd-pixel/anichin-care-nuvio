@@ -118,6 +118,34 @@ function seasonOf(title) {
   return 0;
 }
 
+// Alias judul katalog ke nama alternatif yang umum dipakai Anichin.
+var TITLE_ALIASES = {
+  'soul land': ['Douluo Dalu', 'Combat Continent'],
+  'soul land 2': ['Douluo Dalu 2', 'The Unrivaled Tang Sect'],
+  'soul land 3': ['Douluo Dalu 3', 'The Legend of the Dragon King'],
+  'soul land 4': ['Douluo Dalu 4', 'Ultimate Douluo'],
+  'battle through the heavens': ['Doupo Cangqiong', 'Fights Break Sphere'],
+  'perfect world': ['Wanmei Shijie'],
+  'swallowed star': ['Tunshi Xingkong'],
+  'renegade immortal': ['Xian Ni'],
+  'a will eternal': ['Yi Nian Yong Heng'],
+  'the kings avatar': ['Quanzhi Gaoshou'],
+  'martial universe': ['Wu Dong Qian Kun'],
+  'stellar transformations': ['Xing Chen Bian'],
+  'throne of seal': ['Shen Yin Wangzuo'],
+  'the great ruler': ['Da Zhu Zai'],
+  'apotheosis': ['Bai Lian Cheng Shen'],
+  'immortality': ['Yong Sheng'],
+  'the westward': ['Xi Xing Ji'],
+  'fog hill of five elements': ['Wu Shan Wu Xing'],
+  'spirit cage': ['Ling Long', 'Ling Cage'],
+  'dragon prince yuan': ['Yuan Zun'],
+  'stellar swordmaster': ['Xing Wu Shen Jue']
+};
+function aliasesFor(title) {
+  return (TITLE_ALIASES[norm(title)] || []).slice(0);
+}
+
 function baseName(title) {
   return norm(title)
     .replace(/\bseason \d+\b/g, ' ')
@@ -414,8 +442,8 @@ function titleOk(ctx, html) {
   if (ctx.type === 'movie') return true;
   var t = pageTitle(html).replace(/\s*(?:episode|eps?)\s*\d+.*$/i, '').replace(/\s+[-\u2013|]\s+.*$/, '');
   if (!norm(t)) return true;
-  var best = 0;
-  for (var i = 0; i < ctx.titles.length; i++) best = Math.max(best, similarity(t, ctx.titles[i]));
+  var best = 0, matchTitles = ctx.matchTitles || ctx.titles;
+  for (var i = 0; i < matchTitles.length; i++) best = Math.max(best, similarity(t, matchTitles[i]));
   return best >= 0.5;
 }
 
@@ -900,13 +928,19 @@ function getStreams(tmdbId,mediaType,season,episode){
   return resolveMeta(ctx,parseContentId(tmdbId)).then(function(meta){
     if(!meta||!meta.titles||!meta.titles.length)return [];
     ctx.titles=meta.titles;
-    var queries=unique(meta.titles.map(function(t){return slugify(t);}).filter(function(x){return !!x;})),tasks=[];
+    var matchTitles = meta.titles.slice(0);
+    for (var mt = 0; mt < meta.titles.length; mt++) {
+      var aliases = aliasesFor(meta.titles[mt]);
+      for (var ai = 0; ai < aliases.length; ai++) matchTitles.push(aliases[ai]);
+    }
+    ctx.matchTitles = unique(matchTitles);
+    var queries=unique(ctx.matchTitles.map(function(t){return slugify(t);}).filter(function(x){return !!x;})).slice(0,8),tasks=[];
     for(var i=0;i<queries.length;i++)(function(q){
       tasks.push(function(){var url=ctx.base+'/?s='+encodeURIComponent(q.replace(/-/g,' '));return getHtml(ctx,url,ctx.base+'/').then(function(r){return r?parseCards(r.text,r.url||url):[];});});
       tasks.push(function(){var url=ctx.base+'/wp-json/wp/v2/search?search='+encodeURIComponent(q.replace(/-/g,' '))+'&per_page=10';return getJson(ctx,url,{referer:ctx.base+'/'}).then(function(j){var a=[];if(j&&j.length)for(var k=0;k<j.length;k++)if(j[k]&&j[k].url&&j[k].title&&j[k].title.rendered)a.push({url:j[k].url,title:decodeEntities(j[k].title.rendered.replace(/<[^>]+>/g,' '))});return a;});});
     })(queries[i]);
     return runAll(tasks).then(function(cards){
-      var ranked=rankCandidates(cards||[],ctx.titles,s),candidateTasks=[];
+      var ranked=rankCandidates(cards||[],ctx.matchTitles,s),candidateTasks=[];
       for(var c=0;c<Math.min(ranked.length,6);c++)(function(candidate){
         candidateTasks.push(function(){return getHtml(ctx,candidate.url,ctx.base+'/').then(function(page){
           if(!page||!titleOk(ctx,page.text))return [];
