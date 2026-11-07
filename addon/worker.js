@@ -15,9 +15,9 @@ const CATALOGS = [
 
 const MANIFEST = {
   id: "community.donghua.catalog",
-  version: "0.3.0",
+  version: "0.4.0",
   name: "Donghua Catalog",
-  description: "Katalog dan metadata donghua dari Kitsu. Tidak menyediakan streaming.",
+  description: "Katalog donghua berbasis pencarian Kitsu. Tidak menyediakan streaming.",
   resources: ["catalog", "meta"],
   types: ["series", "movie"],
   idPrefixes: ["kitsu:"],
@@ -47,7 +47,7 @@ async function kitsuRequest(path) {
   const response = await fetch(KITSU_API + path, {
     headers: {
       "accept": "application/vnd.api+json",
-      "user-agent": "Nuvio-Donghua-Catalog/0.3"
+      "user-agent": "Nuvio-Donghua-Catalog/0.4"
     }
   });
 
@@ -111,11 +111,11 @@ async function getCatalog(type, params) {
   const search = (params.get("search") || "").trim();
   const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
   const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
-  const terms = search ? [search] : ["donghua", "Chinese animation", "Chinese anime"];
+  const terms = search ? [search] : ["donghua"];
   const collected = new Map();
 
-  // Kitsu search is text-based. Search a few common labels for donghua,
-  // then merge duplicate records. User-provided search replaces those labels.
+  // Kitsu search is text-based. Use the specific "donghua" term for the
+  // default catalog to reduce unrelated anime. User search replaces this term.
   for (const term of terms) {
     const result = await searchKitsu(term, subtype, skip);
     for (const item of (result.data || [])) {
