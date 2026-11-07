@@ -220,7 +220,7 @@ async function getCatalog(type, params) {
 async function getMeta(type, rawId) {
   if (rawId.indexOf("bangumi:") === 0) {
     const id = rawId.replace(/^bangumi:/, "");
-    if (!/^\\d+$/.test(id)) return { meta: null };
+    if (!/^\d+$/.test(id)) return { meta: null };
     const payload = await bangumiRequest("/subjects/" + encodeURIComponent(id));
     const item = payload.data || payload;
     if (!item || !item.id) return { meta: null };
@@ -230,7 +230,7 @@ async function getMeta(type, rawId) {
       item.platform ? "Format: " + item.platform : "",
       item.eps ? "Episodes: " + item.eps : "",
       item.score ? "Rating: " + item.score : ""
-    ].filter(Boolean).join("\\n\\n");
+    ].filter(Boolean).join("\n\n");
     return { meta: {
       id: "bangumi:" + item.id,
       type: bangumiItemType(item),
