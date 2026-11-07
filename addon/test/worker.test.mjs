@@ -9,7 +9,7 @@ function mockFetch(url, options = {}) {
       data: [{
         id: "9001",
         attributes: {
-          titles: { en: "Mock Donghua", zh_cn: "测试动画" },
+          titles: { en: "Mock Donghua", zh_cn: "Mock Donghua" },
           canonicalTitle: "Mock Donghua",
           startDate: "2024-01-01",
           subtype: parsed.searchParams.get("filter[subtype]") === "movie" ? "movie" : "TV",
@@ -37,7 +37,7 @@ function mockFetch(url, options = {}) {
   }
   if (parsed.hostname === "api.bgm.tv" && parsed.pathname === "/v0/subjects/2001") {
     return Promise.resolve(new Response(JSON.stringify({
-      id: 2001, name: "Mock Bangumi", name_cn: "测试国创",
+      id: 2001, name: "Mock Bangumi", name_cn: "Mock Bangumi",
       date: "2023-01-01", platform: "TV", eps: 24,
       summary: "Mock summary", images: { large: "https://example.com/bangumi.jpg" }
     }), { status: 200, headers: { "content-type": "application/json" } }));
