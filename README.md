@@ -133,12 +133,6 @@ Pengguna bertanggung jawab untuk mematuhi hukum, ketentuan layanan, dan hak cipt
 **Status proyek:** Unofficial community-made provider for Nuvio.
 
 
-## Anichin Catalog Addon (Cloudflare Workers)
+## Donghua Catalog Addon (Cloudflare Workers)
 
-Repository ini juga memiliki addon katalog terpisah di folder `addon/`.
-
-- Source Worker: [addon/worker.js](addon/worker.js)
-- Konfigurasi Wrangler: [addon/wrangler.toml](addon/wrangler.toml)
-- Panduan deployment: [addon/README.md](addon/README.md)
-
-Addon ini menggunakan protokol Stremio agar katalog dan metadata Anichin dapat dibaca Nuvio. Tahap awal masih eksperimental dan belum menyediakan playback mandiri. Integrasi ID katalog dengan provider Anichin Care harus diselesaikan serta diuji sebelum dinyatakan siap digunakan.
+Folder `addon/` berisi addon katalog Stremio untuk Nuvio. Addon ini menggabungkan metadata publik Kitsu dan Bangumi, menyediakan katalog serial (TV/ONA/OVA/special) dan film, serta endpoint metadata. Addon katalog ini **terpisah** dari scraper Anichin Care di `providers/`, dan tidak menyediakan video stream. Lihat [`addon/README.md`](addon/README.md) untuk instalasi, deployment, batasan, dan pengujian.
