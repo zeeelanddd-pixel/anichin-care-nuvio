@@ -10,19 +10,18 @@ const BANGUMI_API = "https://api.bgm.tv/v0";
 const PAGE_SIZE = 20;
 const REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_SEARCH_TERMS = [
-  "donghua",
-  "Soul Land",
-  "Battle Through the Heavens",
-  "Perfect World",
-  "Swallowed Star",
-  "Renegade Immortal",
-  "A Will Eternal",
-  "The Kings Avatar",
-  "Fog Hill of Five Elements",
-  "The Westward",
-  "斗破苍穹", "斗罗大陆", "完美世界", "吞噬星空", "凡人修仙传",
-  "仙逆", "一念永恒", "雾山五行", "西行纪", "灵笼", "眷思量",
-  "天官赐福", "魔道祖师", "全职高手", "时光代理人", "国漫", "中国动画电影"
+  "donghua", "Soul Land", "Douluo Dalu", "Battle Through the Heavens",
+  "Doupo Cangqiong", "Perfect World", "Wanmei Shijie", "Swallowed Star",
+  "Tunshi Xingkong", "Renegade Immortal", "Xian Ni", "A Will Eternal",
+  "Yi Nian Yong Heng", "The King's Avatar", "Quanzhi Gaoshou",
+  "Fog Hill of Five Elements", "Wu Shan Wu Xing", "The Westward",
+  "Xi Xing Ji", "Spirit Cage", "Ling Long", "Link Click",
+  "Shiguang Dailiren", "Heaven Official's Blessing", "Tian Guan Ci Fu",
+  "Grandmaster of Demonic Cultivation", "Mo Dao Zu Shi", "The Daily Life of the Immortal King",
+  "Xian Wang de Richang Shenghuo", "Scissor Seven", "Cike Wu Liuqi",
+  "The Legend of Hei", "Luo Xiaohei Zhanji", "Nezha", "White Snake",
+  "New Gods Nezha Reborn", "Chang An San Wan Li", "Deep Sea",
+  "The Girl Downstairs", "Rakshasa Street", "Zhen Hun Jie"
 ];
 const SERIES_SUBTYPES = ["TV", "ONA", "OVA", "special"];
 const CATALOGS = [
@@ -92,10 +91,15 @@ async function kitsuRequest(path) {
   return payload;
 }
 
+function isLatinTitle(value) {
+  return typeof value === "string" && /[A-Za-z]/.test(value)
+    && !/[\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]/.test(value);
+}
 function titleOf(attributes) {
   const titles = attributes.titles || {};
-  return titles.en || titles.en_jp || titles.zh_cn || titles.zh || titles.ja_jp
-    || attributes.canonicalTitle || "Untitled";
+  const candidates = [titles.en, titles.en_jp, attributes.canonicalTitle, titles.ja_jp];
+  for (const value of candidates) if (isLatinTitle(value)) return value.trim();
+  return "";
 }
 
 function posterOf(attributes) {
@@ -182,7 +186,7 @@ function toBangumiPreview(item) {
   return {
     id: "bangumi:" + item.id,
     type: bangumiItemType(item),
-    name: item.name_cn || item.name || "Untitled",
+    name: isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""),
     poster: bangumiPoster(item),
     posterShape: "poster",
     description: [year, item.platform || "", episodes ? episodes + " episodes" : "", item.score ? "rating " + item.score : ""].filter(Boolean).join(" • ") || "Metadata from Bangumi."
@@ -198,7 +202,7 @@ async function getCatalog(type, params) {
   const skip = Math.max(0, Number.parseInt(params.get("skip") || "0", 10) || 0);
   const subtype = type === "movie" ? "movie" : SERIES_SUBTYPES.join(",");
   const kitsuTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
-  const bangumiTerms = search ? [search] : ["国创", "国漫", "国产动画", "中国动画", "中国动画电影", "中国动画剧集", "动画电影", "斗罗大陆", "斗破苍穹", "凡人修仙传", "灵笼", "眷思量", "雾山五行", "西行纪", "天官赐福", "魔道祖师", "全职高手", "时光代理人"];
+  const bangumiTerms = search ? [search] : DEFAULT_SEARCH_TERMS;
   const pair = await Promise.all([
     Promise.all(kitsuTerms.map((term) => searchKitsu(term, subtype, 0).catch(() => ({ data: [] })))),
     Promise.all(bangumiTerms.map((term) => searchBangumi(term).catch(() => ({ data: [] }))))
@@ -224,7 +228,7 @@ async function getCatalog(type, params) {
     for (const item of candidates) {
       if (!item) continue;
       const isKitsu = !!item.attributes;
-      const title = isKitsu ? titleOf(item.attributes) : (item.name_cn || item.name);
+      const title = isKitsu ? titleOf(item.attributes) : (isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""));
       const year = isKitsu ? String(item.attributes.startDate || "").slice(0, 4) : String(item.date || "").slice(0, 4);
       const key = normalizedTitle(title) + "|" + year + "|" + type;
       if (!title || seen.has(key)) continue;
@@ -251,7 +255,7 @@ async function getMeta(type, rawId) {
     return { meta: {
       id: "bangumi:" + item.id,
       type: bangumiItemType(item),
-      name: item.name_cn || item.name || "Untitled",
+      name: isLatinTitle(item.name) ? item.name : (isLatinTitle(item.name_cn) ? item.name_cn : ""),
       poster: bangumiPoster(item),
       posterShape: "poster",
       description: details,
