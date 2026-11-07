@@ -277,7 +277,7 @@ function tmdb(ctx, path, params) {
 
 function parseContentId(id) {
   var s = String(id == null ? '' : id).trim(), m;
-  if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };
+  if ((m = /^tmdb:(\d+)/i.exec(s))) return { kind: 'tmdb', id: m[1] };\n  if ((m = /^kitsu:(\d+)/i.exec(s))) return { kind: 'kitsu', id: m[1] };\n  if ((m = /^bangumi:(\d+)/i.exec(s))) return { kind: 'bangumi', id: m[1] };
   if ((m = /(tt\d+)/i.exec(s))) return { kind: 'imdb', id: m[1] };
   if (/^\d+$/.test(s)) return { kind: 'tmdb', id: s };
   return { kind: 'unknown', id: s };
@@ -289,16 +289,30 @@ function isLatin(t) {
 
 function resolveMeta(ctx, parsed) {
   var kind = ctx.type === 'movie' ? 'movie' : 'tv', idP;
-  if (parsed.kind === 'tmdb') {
-    idP = Promise.resolve(parsed.id);
-  } else if (parsed.kind === 'imdb') {
+  if (parsed.kind === 'kitsu') {
+    return getJson(ctx, 'https://kitsu.io/api/edge/anime/' + encodeURIComponent(parsed.id), { referer: 'https://kitsu.io/' }).then(function (payload) {
+      var a = payload && payload.data && payload.data.attributes;
+      if (!a) return null;
+      var t = a.titles || {}, list = [t.en, t.en_jp, a.canonicalTitle, t.ja_jp], titles = [];
+      for (var i = 0; i < list.length; i++) if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+      return { titles: unique(titles), seasons: [] };
+    }).catch(function () { return null; });
+  }
+  if (parsed.kind === 'bangumi') {
+    return getJson(ctx, 'https://api.bgm.tv/v0/subjects/' + encodeURIComponent(parsed.id), { referer: 'https://bgm.tv/' }).then(function (item) {
+      if (!item) return null;
+      var list = [item.name, item.name_cn], titles = [];
+      for (var i = 0; i < list.length; i++) if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+      return { titles: unique(titles), seasons: [] };
+    }).catch(function () { return null; });
+  }
+  if (parsed.kind === 'tmdb') idP = Promise.resolve(parsed.id);
+  else if (parsed.kind === 'imdb') {
     idP = tmdb(ctx, '/find/' + parsed.id, { external_source: 'imdb_id' }).then(function (j) {
       var arr = j && (kind === 'movie' ? j.movie_results : j.tv_results);
       return arr && arr[0] ? String(arr[0].id) : null;
     });
-  } else {
-    idP = Promise.resolve(null);
-  }
+  } else idP = Promise.resolve(null);
   return idP.then(function (id) {
     if (!id) return null;
     return Promise.all([
@@ -309,11 +323,9 @@ function resolveMeta(ctx, parsed) {
       if (!d) return null;
       var list = [d.name || d.title, d.original_name || d.original_title];
       var extra = (alt && (alt.results || alt.titles)) || [];
-      var i, titles = [];
-      for (i = 0; i < extra.length; i++) list.push(extra[i].title);
-      for (i = 0; i < list.length; i++) {
-        if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
-      }
+      for (var i = 0; i < extra.length; i++) list.push(extra[i].title);
+      var titles = [];
+      for (var j = 0; j < list.length; j++) if (list[j] && isLatin(list[j])) titles.push(String(list[j]).trim());
       return { titles: unique(titles).slice(0, 5), seasons: d.seasons || [] };
     });
   });
