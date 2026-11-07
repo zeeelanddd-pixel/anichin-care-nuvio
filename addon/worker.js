@@ -171,7 +171,7 @@ async function searchBangumi(term) {
 }
 
 function bangumiItemType(item) {
-  const value = String(item.platform || "") + " " + String(item.name_cn || item.name || "");
+  const value = String(item.platform || "") + " " + String(item.name || "") + " " + String(item.name_cn || "");
   return /movie|film|剧场版|电影|劇場/i.test(value) ? "movie" : "series";
 }
 
