@@ -88,7 +88,7 @@ async function kitsuRequest(path) {
 
 function isLatinTitle(value) {
   return typeof value === "string" && /[A-Za-z]/.test(value)
-    && !/[\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]/.test(value);
+    && !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(value);
 }
 function titleOf(attributes) {
   const titles = attributes.titles || {};
@@ -167,7 +167,7 @@ async function searchBangumi(term) {
 
 function bangumiItemType(item) {
   const value = String(item.platform || "") + " " + String(item.name || "") + " " + String(item.name_cn || "");
-  return /movie|film|剧场版|电影|劇場/i.test(value) ? "movie" : "series";
+  return /movie|film|theatrical/i.test(value) ? "movie" : "series";
 }
 
 function bangumiPoster(item) {
