@@ -7,6 +7,9 @@
  *   TMDB id -> judul -> cari halaman episode -> ambil daftar server (select.mirror, iframe base64)
  *   -> resolve embed (Okru / Dailymotion / Rumble / generik) menjadi URL m3u8/mp4 langsung.
  *
+ * Mode debug (DEBUG_STREAMS): bila tidak ada stream, Nuvio menampilkan kartu "Anichin ⚠ debug" berisi
+ * diagnosis singkat (key TMDB, status HTTP, server yang ditemukan). Set false setelah berfungsi.
+ *
  * Catatan: Nuvio hanya bisa memutar URL media langsung (m3u8/mp4). URL halaman embed
  * (mis. https://ok.ru/videoembed/123) TIDAK bisa diputar, jadi harus di-resolve dulu.
  */
@@ -16,9 +19,11 @@ var cheerio = require('cheerio-without-node-native');
 var PROVIDER_ID = 'anichin-care';
 var PROVIDER_NAME = 'Anichin';
 var BASES = ['https://anichin.moe']; // tambahkan domain cadangan di sini bila situs pindah
-// Nuvio biasanya menyuntikkan TMDB_API_KEY. Jika tidak ada, isi key TMDB gratis Anda di sini.
-var TMDB_KEY = (typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? TMDB_API_KEY : '';
-var PLUGIN_VERSION = '1.1.1'; // muncul di log: pastikan versi inilah yang dimuat Nuvio
+var DEBUG_STREAMS = true;  // true: bila hasil kosong, tampilkan kartu "debug" berisi diagnosis (set false jika sudah beres)
+var TMDB_KEY_MANUAL = '';  // opsional: isi API key TMDB milik Anda bila key bawaan Nuvio kosong/tidak valid
+// Nuvio menyuntikkan TMDB_API_KEY ke plugin; TMDB_KEY_MANUAL (jika diisi) diutamakan.
+var TMDB_KEY = TMDB_KEY_MANUAL || ((typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? String(TMDB_API_KEY) : '');
+var PLUGIN_VERSION = '1.1.2'; // muncul di log: pastikan versi inilah yang dimuat Nuvio
 var TOTAL_BUDGET = 40000;  // batas total satu panggilan getStreams (ms)
 var UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
@@ -29,6 +34,26 @@ function log() {
     for (var i = 0; i < arguments.length; i++) a.push(arguments[i]);
     console.log.apply(console, a);
   } catch (e) {}
+}
+
+// Jejak diagnosis: tampil di log dan (jika DEBUG_STREAMS) di kartu debug. JANGAN pernah memasukkan API key.
+function note(ctx, msg) {
+  msg = String(msg);
+  if (msg.length > 110) msg = msg.slice(0, 107) + '...';
+  if (ctx && ctx.trace && ctx.trace.length < 24) ctx.trace.push(msg);
+  log(msg);
+}
+
+function noteOnce(ctx, key, msg) {
+  if (ctx && ctx.once && !ctx.once[key]) { ctx.once[key] = 1; note(ctx, msg); }
+}
+
+function bump(ctx, key) {
+  if (ctx && ctx.stats) ctx.stats[key] = (ctx.stats[key] || 0) + 1;
+}
+
+function shortUrl(u) {
+  return String(u || '').replace(/^https?:\/\/(?:www\.)?/i, '').replace(/[?#].*$/, '');
 }
 
 function unique(arr) {
@@ -183,27 +208,62 @@ function blocked(r) {
 // null jika diblokir Cloudflare / error HTTP
 function getHtml(ctx, url, referer) {
   return http(ctx, url, { referer: referer }).then(function (r) {
-    if (blocked(r)) { log('diblokir (Cloudflare?)', r.status, url); return null; }
-    if (r.status >= 400) { log('HTTP', r.status, url); return null; }
+    if (blocked(r)) {
+      bump(ctx, 'CF' + r.status);
+      noteOnce(ctx, 'cf', 'diblokir ' + r.status + ' (Cloudflare?) ' + shortUrl(url));
+      return null;
+    }
+    bump(ctx, String(r.status));
+    if (r.status >= 400) return null;
     return r;
-  }).catch(function (e) { log('gagal fetch', url, e && e.message); return null; });
+  }).catch(function (e) {
+    bump(ctx, 'ERR');
+    noteOnce(ctx, 'err', 'fetch error: ' + (e && e.message) + ' @ ' + shortUrl(url));
+    return null;
+  });
 }
 
 function getJson(ctx, url, o) {
   o = o || {};
   o.json = true;
   return http(ctx, url, o).then(function (r) {
-    if (r.status >= 400) return null;
-    try { return JSON.parse(r.text); } catch (e) { return null; }
-  }).catch(function () { return null; });
+    bump(ctx, 'json' + r.status);
+    if (r.status >= 400) { noteOnce(ctx, 'jsonhttp' + r.status, 'HTTP ' + r.status + ' ' + shortUrl(url)); return null; }
+    try { return JSON.parse(r.text); } catch (e) { noteOnce(ctx, 'jsonparse', 'bukan JSON: ' + shortUrl(url)); return null; }
+  }).catch(function (e) {
+    noteOnce(ctx, 'jsonerr', 'fetch error: ' + (e && e.message) + ' @ ' + shortUrl(url));
+    return null;
+  });
 }
 
 /* ───────────── TMDB ───────────── */
+function tmdbIsToken() { return TMDB_KEY.length > 40 && /^eyJ/.test(TMDB_KEY); } // token baca v4 (JWT)
+
+function keyState() {
+  return TMDB_KEY ? (tmdbIsToken() ? 'ada(v4)' : 'ada(' + TMDB_KEY.length + ' huruf)') : 'KOSONG';
+}
+
 function tmdb(ctx, path, params) {
   if (!TMDB_KEY) return Promise.resolve(null);
-  var qs = 'api_key=' + encodeURIComponent(TMDB_KEY);
-  for (var k in (params || {})) qs += '&' + k + '=' + encodeURIComponent(params[k]);
-  return getJson(ctx, 'https://api.themoviedb.org/3' + path + '?' + qs);
+  var qs = [], k, token = tmdbIsToken();
+  if (!token) qs.push('api_key=' + encodeURIComponent(TMDB_KEY));
+  for (k in (params || {})) qs.push(k + '=' + encodeURIComponent(params[k]));
+  return getJson(ctx, 'https://api.themoviedb.org/3' + path + (qs.length ? '?' + qs.join('&') : ''),
+    token ? { headers: { 'Authorization': 'Bearer ' + TMDB_KEY } } : {});
+}
+
+// Cadangan tanpa API key: baca judul dari halaman web TMDB (og:title)
+function tmdbWebTitle(ctx, kind, id) {
+  return getHtml(ctx, 'https://www.themoviedb.org/' + kind + '/' + id + '?language=en-US', 'https://www.themoviedb.org/').then(function (r) {
+    if (!r) return null;
+    var m = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i.exec(r.text) ||
+            /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i.exec(r.text) ||
+            /<title[^>]*>([^<]+)<\/title>/i.exec(r.text);
+    if (!m) return null;
+    var t = decodeEntities(m[1]).replace(/\s*[\u2014\u2013-]\s*The Movie Database.*$/i, '')
+      .replace(/\s*\((?:TV Series\s*)?\d{4}[^)]*\)\s*$/i, '').replace(/\s+/g, ' ').trim();
+    return t && isLatin(t) ? t : null;
+  });
 }
 
 function parseContentId(id) {
@@ -232,21 +292,28 @@ function resolveMeta(ctx, parsed) {
     idP = Promise.resolve(null);
   }
   return idP.then(function (id) {
-    if (!id) return null;
+    if (!id) { note(ctx, 'id konten tidak dikenali: ' + parsed.kind); return null; }
     return Promise.all([
       tmdb(ctx, '/' + kind + '/' + id, { language: 'en-US' }),
       tmdb(ctx, '/' + kind + '/' + id + '/alternative_titles', {})
     ]).then(function (res) {
       var d = res[0], alt = res[1];
-      if (!d) return null;
-      var list = [d.name || d.title, d.original_name || d.original_title];
-      var extra = (alt && (alt.results || alt.titles)) || [];
-      var i, titles = [];
-      for (i = 0; i < extra.length; i++) list.push(extra[i].title);
-      for (i = 0; i < list.length; i++) {
-        if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+      if (d) {
+        var list = [d.name || d.title, d.original_name || d.original_title];
+        var extra = (alt && (alt.results || alt.titles)) || [];
+        var i, titles = [];
+        for (i = 0; i < extra.length; i++) list.push(extra[i].title);
+        for (i = 0; i < list.length; i++) {
+          if (list[i] && isLatin(list[i])) titles.push(String(list[i]).trim());
+        }
+        note(ctx, 'TMDB api ok');
+        return { titles: unique(titles).slice(0, 5), seasons: d.seasons || [] };
       }
-      return { titles: unique(titles).slice(0, 5), seasons: d.seasons || [] };
+      note(ctx, 'TMDB api gagal (key ' + keyState() + '); coba halaman web TMDB');
+      return tmdbWebTitle(ctx, kind, id).then(function (t) {
+        if (t) note(ctx, 'judul dari halaman web TMDB');
+        return t ? { titles: [t], seasons: [] } : null;
+      });
     });
   });
 }
@@ -454,74 +521,4 @@ function extractServers(html, pageUrl) {
   return servers;
 }
 
-/* ───────────── Resolver embed -> URL langsung ───────────── */
-var OK_Q = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
-
-function okruStreams(meta) {
-  var out = [], hdr = { 'User-Agent': UA, 'Referer': 'https://ok.ru/' };
-  if (!meta) return out;
-  var hls = meta.hlsManifestUrl || meta.ondemandHls || meta.hlsMasterPlaylistUrl;
-  if (hls) out.push({ url: absUrl(hls, 'https://ok.ru'), quality: 'Auto', type: 'hls', headers: hdr });
-  var vids = meta.videos || [];
-  for (var i = 0; i < vids.length; i++) {
-    var q = OK_Q[vids[i].name];
-    if (!vids[i].url || (q && q < 360)) continue;
-    out.push({ url: absUrl(vids[i].url, 'https://ok.ru'), quality: q ? q + 'p' : 'HD', type: 'mp4', headers: hdr });
-  }
-  return out;
-}
-
-function resolveOkru(ctx, url) {
-  var m = /\/video(?:embed)?\/(\d+)/i.exec(url);
-  if (!m) return Promise.resolve([]);
-  var embed = 'https://ok.ru/videoembed/' + m[1];
-  return http(ctx, embed, { referer: ctx.base + '/' }).then(function (r) {
-    var mm = /data-options="([^"]+)"/.exec(r.text);
-    if (!mm) return [];
-    var opts;
-    try { opts = JSON.parse(decodeEntities(mm[1])); } catch (e) { return []; }
-    var fv = (opts && opts.flashvars) || {}, metaP;
-    if (fv.metadata) {
-      try { metaP = Promise.resolve(typeof fv.metadata === 'string' ? JSON.parse(fv.metadata) : fv.metadata); }
-      catch (e2) { metaP = Promise.resolve(null); }
-    } else if (fv.metadataUrl) {
-      metaP = getJson(ctx, absUrl(fv.metadataUrl, 'https://ok.ru'), { referer: embed });
-    } else {
-      metaP = Promise.resolve(null);
-    }
-    return metaP.then(okruStreams);
-  });
-}
-
-function resolveDailymotion(ctx, url) {
-  var m = /(?:\/video\/|[?&]video=|dai\.ly\/)([a-z0-9]+)/i.exec(url);
-  if (!m) return Promise.resolve([]);
-  var api = 'https://www.dailymotion.com/player/metadata/video/' + m[1] + '?embedder=' + encodeURIComponent(ctx.base + '/');
-  return getJson(ctx, api, { referer: ctx.base + '/' }).then(function (j) {
-    var auto = j && j.qualities && j.qualities.auto && j.qualities.auto[0];
-    if (!auto || !auto.url) return [];
-    return [{ url: auto.url, quality: 'Auto', type: 'hls', headers: { 'User-Agent': UA, 'Referer': 'https://www.dailymotion.com/' } }];
-  });
-}
-
-function resolveRumble(ctx, url) {
-  var m = /\/embed\/([a-z0-9]+)/i.exec(url);
-  if (!m) return Promise.resolve([]);
-  var api = 'https://rumble.com/embedJS/u3/?request=video&ver=2&v=' + m[1];
-  return getJson(ctx, api, { referer: 'https://rumble.com/' }).then(function (j) {
-    var out = [], ua = j && j.ua, hdr = { 'User-Agent': UA, 'Referer': 'https://rumble.com/' };
-    if (!ua) return out;
-    for (var fmt in ua) {
-      var group = ua[fmt];
-      for (var h in group) {
-        var item = group[h];
-        if (!item || !item.url) continue;
-        if (fmt === 'hls') out.push({ url: item.url, quality: 'Auto', type: 'hls', headers: hdr });
-        else if (fmt === 'mp4') out.push({ url: item.url, quality: /^\d+$/.test(h) ? h + 'p' : 'HD', type: 'mp4', headers: hdr });
-      }
-    }
-    return out;
-  });
-}
-
-// Host lain: cari m3u8/mp4 l
+/* ───────────── Resolver embed -> URL langsung ───────────── 
