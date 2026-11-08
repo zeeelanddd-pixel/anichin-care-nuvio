@@ -1,0 +1,22 @@
+name: Validate provider
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check JavaScript syntax
+        run: node --check providers/anichin-care.js
+      - name: Check provider contract
+        run: node tests/provider-contract.test.js
+      - name: Validate manifest JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('Manifest JSON OK')"
