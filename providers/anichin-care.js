@@ -294,13 +294,16 @@ function getStreams(tmdbId, mediaType, season, episode) {
                 var item = resolved[a][b];
                 if (!item.url) continue;
                 // Buang query token sementara agar URL media yang sama tidak muncul berkali-kali.
-                var canonical = String(item.url).replace(/[?#].*$/, "").replace(/\\/+/g, "/");
+                var canonical = String(item.url).split("?")[0].split("#")[0];
                 var host = hostOf(item.url);
-                var path = canonical.replace(/^https?:\\/\\/[^/]+/i, "").toLowerCase();
+                var hostEnd = canonical.indexOf("://");
+                var pathAndHost = hostEnd >= 0 ? canonical.substring(hostEnd + 3) : canonical;
+                var pathStart = pathAndHost.indexOf("/");
+                var path = pathStart >= 0 ? pathAndHost.substring(pathStart).toLowerCase() : "/";
                 var dedupeKey = host + path;
                 if (seen[dedupeKey]) continue;
                 seen[dedupeKey] = true;
-                var label = stripTags(item.label || "Server").replace(/\\s+/g, " ").trim();
+                var label = stripTags(item.label || "Server").replace(/[ \t\r\n]+/g, " ").trim();
                 var resolution = /(?:^|[^0-9])(2160|1440|1080|720|480|360)p(?:[^0-9]|$)/i.exec(label + " " + item.url);
                 streams.push({
                   name: PROVIDER,
