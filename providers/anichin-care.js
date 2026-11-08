@@ -3,8 +3,8 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.0";
-var PROVIDER = "Anichin Care";
+var VERSION = "1.2.1";
+var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
 var MAX_RESULTS = 12;
@@ -296,9 +296,9 @@ function getStreams(tmdbId, mediaType, season, episode) {
                 seen[item.url] = true;
                 streams.push({
                   name: PROVIDER,
-                  title: item.label + " - " + (/\.m3u8/i.test(item.url) ? "HLS" : "MP4"),
+                  title: item.label || "Server",
                   url: item.url,
-                  quality: "Auto",
+                  quality: item.label || "Auto",
                   headers: { "Referer": item.referer || page.url, "User-Agent": UA }
                 });
                 if (streams.length >= MAX_RESULTS) break;
