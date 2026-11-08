@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.2";
+var VERSION = "1.2.3";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -303,13 +303,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
                 var dedupeKey = host + path;
                 if (seen[dedupeKey]) continue;
                 seen[dedupeKey] = true;
-                var label = stripTags(item.label || "Server").replace(/[ \t\r\n]+/g, " ").trim();
+                var label = stripTags(item.label || "").replace(/[ \t\r\n]+/g, " ").trim();
+                var hostLabel = host === "ok.ru" || host === "odnoklassniki.ru" ? "OK.ru" :
+                  host === "rumble.com" ? "Rumble" :
+                  host === "dailymotion.com" || host === "dmcdn.net" ? "Dailymotion" : host;
+                if (!label || /^(server|mirror|auto)$/i.test(label)) label = hostLabel || "Server";
                 var resolution = /(?:^|[^0-9])(2160|1440|1080|720|480|360)p(?:[^0-9]|$)/i.exec(label + " " + item.url);
+                var displayQuality = resolution ? resolution[1] + "p" : label;
                 streams.push({
                   name: PROVIDER,
                   title: label + (resolution ? " • " + resolution[1] + "p" : ""),
                   url: item.url,
-                  quality: resolution ? resolution[1] + "p" : "Auto",
+                  quality: displayQuality,
                   headers: { "Referer": item.referer || page.url, "User-Agent": UA }
                 });
                 if (streams.length >= MAX_RESULTS) break;
