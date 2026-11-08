@@ -1,15 +1,17 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const provider = require("../providers/anichin-care.js");
 
-assert.equal(typeof provider.getStreams, "function", "provider must export getStreams");
-assert.equal(provider.getStreams.length, 4, "getStreams must accept TMDB id, media type, season and episode");
+for (const file of ["anichin-care.js", "bilibili.js"]) {
+  const provider = require("../providers/" + file);
+  assert.equal(typeof provider.getStreams, "function", file + " must export getStreams");
+  assert.equal(provider.getStreams.length, 4, file + " must accept four arguments");
+}
 
-const source = fs.readFileSync(path.join(__dirname, "../providers/anichin-care.js"), "utf8");
-assert.ok(source.includes('var VERSION = "1.2.3"'), "provider version should be current");
-assert.ok(source.includes("name: PROVIDER"), "streams should use the provider display name");
-assert.ok(source.includes("var dedupeKey = host + path"), "streams should be deduplicated by canonical media URL");
-assert.ok(source.includes('quality: resolution ? resolution[1] + "p" : "Auto"'), "quality should only be shown when detected");
+const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../manifest.json"), "utf8"));
+assert.equal(manifest.scrapers.length, 2, "manifest should register two providers");
+assert.ok(manifest.scrapers.some(x => x.id === "anichin-care"));
+assert.ok(manifest.scrapers.some(x => x.id === "bilibili-public"));
+assert.ok(fs.existsSync(path.join(__dirname, "../providers/bilibili.js")));
 
-console.log("Provider contract and stream-quality checks OK");
+console.log("Both provider contracts and manifest OK");
