@@ -1,14 +1,14 @@
 {
-  "name": "Anichin Care",
-  "version": "1.2.0",
+  "name": "Anichin",
+  "version": "1.2.1",
   "description": "Nuvio provider untuk mencari sumber video Anichin",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin-care",
-      "name": "Anichin Care",
+      "name": "Anichin",
       "description": "Provider video Anichin untuk film dan serial",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "author": "zeeelanddd-pixel",
       "supportedTypes": ["movie", "tv"],
       "filename": "providers/anichin-care.js",
