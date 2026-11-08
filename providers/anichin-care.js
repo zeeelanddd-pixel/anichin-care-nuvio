@@ -226,14 +226,10 @@ function directMediaUrls(html, pageUrl) {
     if (u && !seen[u]) { seen[u] = true; found.push(u); }
     if (found.length >= MAX_RESULTS) break;
   }
-  var keys = ["hlsMasterPlaylistUrl", "hlsManifestUrl", "ondemandHls", "videoUrl", "file"];
-  for (var i = 0; i < keys.length; i++) {
-    var reKey = new RegExp('["\\\\']?' + keys[i] + '["\\\\']?\\s*:\\s*["\\\\']([^"\\\\']+)["\\\\']', "i");
-    var km = reKey.exec(text);
-    if (km) {
-      var ku = absUrl(km[1].replace(/\\\//g, "/"), pageUrl);
-      if (ku && /\.(m3u8|mp4)(?:$|[?#])/i.test(ku) && !seen[ku]) { seen[ku] = true; found.push(ku); }
-    }
+  var keyPattern = /["'](?:hlsMasterPlaylistUrl|hlsManifestUrl|ondemandHls|videoUrl|file)["']\s*:\s*["']([^"']+)["']/gi, km;
+  while ((km = keyPattern.exec(text))) {
+    var ku = absUrl(km[1].replace(/\\\//g, "/"), pageUrl);
+    if (ku && /\.(m3u8|mp4)(?:$|[?#])/i.test(ku) && !seen[ku]) { seen[ku] = true; found.push(ku); }
   }
   return found;
 }
