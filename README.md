@@ -1,6 +1,6 @@
-# Anichin Care
+# Anichin Providers
 
-Satu provider JavaScript untuk Nuvio. Repositori ini hanya berisi provider streaming, bukan katalog metadata atau addon Stremio.
+Kumpulan provider JavaScript untuk Nuvio. Repository ini berisi provider streaming saja, bukan katalog metadata atau addon Stremio.
 
 ## Manifest
 
@@ -8,29 +8,17 @@ Tambahkan URL berikut pada menu Plugins Nuvio:
 
 `https://raw.githubusercontent.com/zeeelanddd-pixel/anichin-care-nuvio/main/manifest.json`
 
-## Isi repositori
+## Provider
 
-- `manifest.json`: mendaftarkan satu scraper/provider.
-- `providers/anichin-care.js`: implementasi provider dengan kontrak `getStreams(tmdbId, mediaType, season, episode)`.
+- **Anichin** — mencari mirror publik dari halaman Anichin. Implementasi: `providers/anichin-care.js`.
+- **Bilibili** — mencari video publik melalui API web Bilibili dan meminta URL playback yang disediakan API. Implementasi: `providers/bilibili.js`.
 
-Tidak ada resource katalog, metadata, atau daftar judul. Nuvio dan katalog lain tetap bertanggung jawab menampilkan judul; provider ini hanya mencari sumber video untuk item yang dipilih.
+Keduanya terdaftar terpisah di Nuvio. Provider Bilibili tidak memakai cookie login, tidak melewati pembatasan wilayah, paywall, DRM, challenge, atau kontrol akses. Hanya URL playback langsung yang diberikan oleh API publik dan kompatibel dengan pemutar yang akan dikembalikan. Konten yang memerlukan login atau tidak diizinkan untuk playback publik dapat menghasilkan daftar kosong.
 
-## Cara kerja
+## Kontrak
 
-1. Mengambil judul dan data season dari TMDB menggunakan `TMDB_API_KEY` yang disediakan runtime Nuvio.
-2. Mencari halaman judul pada endpoint pencarian publik situs.
-3. Untuk serial, memilih halaman episode yang sesuai dengan nomor episode.
-4. Membaca mirror yang memang ditautkan pada halaman episode.
-5. Mengembalikan URL media langsung yang ditemukan pada respons publik host yang didukung.
-
-Provider tidak mencoba melewati halaman challenge, login, token akses, atau pembatasan situs. Jika situs menolak request, provider mengembalikan hasil kosong dan mencatat diagnosis singkat pada log.
-
-## Format hasil
-
-Provider mengembalikan array objek stream dengan `name`, `title`, `url`, `quality`, dan header playback bila diperlukan. URL halaman embed tidak dikembalikan sebagai stream karena Nuvio membutuhkan URL media yang dapat diputar.
+Setiap provider mengekspor `getStreams(tmdbId, mediaType, season, episode)` dan mengembalikan array stream dengan `name`, `title`, `url`, `quality`, dan header playback bila diperlukan.
 
 ## Pengujian
 
-Pemeriksaan otomatis memvalidasi sintaks JavaScript dan kontrak ekspor. Pengujian akhir tetap perlu dilakukan di Nuvio karena akses jaringan dan kompatibilitas playback bergantung pada runtime serta host sumber.
-
-Versi saat ini: **1.2.3**. Stream yang ditemukan dideduplikasi berdasarkan host dan path media, label server dipertahankan, dan resolusi hanya ditampilkan jika dapat dikenali dari label atau URL. Jika resolusi tidak tersedia, nama host seperti OK.ru atau Rumble tetap ditampilkan sebagai label stream.
+GitHub Actions memeriksa sintaks JavaScript, kontrak ekspor, dan validitas JSON manifest. Uji playback nyata tetap bergantung pada ketersediaan konten publik, wilayah, API Bilibili, dan runtime Nuvio.
