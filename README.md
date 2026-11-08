@@ -1,41 +1,36 @@
-# Anichin Care - Nuvio Plugin
+# Anichin Care
 
-Plugin **scraper streaming** untuk Nuvio yang mengambil stream dari Anichin (anichin.moe).
-Ini bukan katalog metadata: katalog hanya menentukan *apa yang tampil*, plugin ini menentukan *dari mana streamnya*.
+Satu provider JavaScript untuk Nuvio. Repositori ini hanya berisi provider streaming, bukan katalog metadata atau addon Stremio.
 
-## Pasang
+## Manifest
 
-URL manifest: https://raw.githubusercontent.com/zeeelanddd-pixel/anichin-care-nuvio/main/manifest.json
+Tambahkan URL berikut pada menu Plugins Nuvio:
 
-Setelah mengganti file, hapus lalu tambah ulang repo di Nuvio supaya versi terbaru terunduh.
-Saat dimuat, log memuat `[AnichinCare] dimuat vX.Y.Z` (penanda versi yang berjalan).
+`https://raw.githubusercontent.com/zeeelanddd-pixel/anichin-care-nuvio/main/manifest.json`
+
+## Isi repositori
+
+- `manifest.json`: mendaftarkan satu scraper/provider.
+- `providers/anichin-care.js`: implementasi provider dengan kontrak `getStreams(tmdbId, mediaType, season, episode)`.
+
+Tidak ada resource katalog, metadata, atau daftar judul. Nuvio dan katalog lain tetap bertanggung jawab menampilkan judul; provider ini hanya mencari sumber video untuk item yang dipilih.
 
 ## Cara kerja
 
-1. Nuvio mengirim TMDB id (+ season/episode).
-2. Judul diambil dari TMDB API (cadangan tanpa key: halaman web TMDB). Hanya judul berhuruf Latin.
-3. Episode dicari di Anichin: tebak slug -> `/seri/{slug}/` -> pencarian situs -> WP REST API.
-4. Server dibaca dari `<select class="mirror">` (nilai option = iframe ter-encode base64).
-5. Embed di-resolve menjadi URL langsung (m3u8/mp4): OK.ru, Rumble, Dailymotion, dan host lain (pindai m3u8/mp4).
+1. Mengambil judul dan data season dari TMDB menggunakan `TMDB_API_KEY` yang disediakan runtime Nuvio.
+2. Mencari halaman judul pada endpoint pencarian publik situs.
+3. Untuk serial, memilih halaman episode yang sesuai dengan nomor episode.
+4. Membaca mirror yang memang ditautkan pada halaman episode.
+5. Mengembalikan URL media langsung yang ditemukan pada respons publik host yang didukung.
 
-Odysee dan D-Tube belum didukung.
+Provider tidak mencoba melewati halaman challenge, login, token akses, atau pembatasan situs. Jika situs menolak request, provider mengembalikan hasil kosong dan mencatat diagnosis singkat pada log.
 
-## Mode debug
+## Format hasil
 
-`DEBUG_STREAMS = true` (default sementara): bila tidak ada stream, daftar Nuvio menampilkan kartu
-"Anichin ⚠ debug" berisi diagnosis (key TMDB, status HTTP, server yang ditemukan, hasil resolve).
-Set `false` setelah berfungsi. API key tidak pernah ditampilkan.
+Provider mengembalikan array objek stream dengan `name`, `title`, `url`, `quality`, dan header playback bila diperlukan. URL halaman embed tidak dikembalikan sebagai stream karena Nuvio membutuhkan URL media yang dapat diputar.
 
-## Batasan runtime Nuvio Mobile (QuickJS)
+## Pengujian
 
-- Tanpa `setTimeout`/`clearTimeout`, tanpa API Node, tanpa `new URL()`.
-- Cheerio di Nuvio adalah polyfill ringan; parser punya cadangan regex.
-- Console plugin tidak selalu terlihat di log aplikasi, karena itu ada kartu debug.
+Pemeriksaan otomatis memvalidasi sintaks JavaScript dan kontrak ekspor. Pengujian akhir tetap perlu dilakukan di Nuvio karena akses jaringan dan kompatibilitas playback bergantung pada runtime serta host sumber.
 
-## Status
-
-- ✅ Dimuat dan dijalankan di runtime QuickJS Nuvio (tanpa SyntaxError)
-- ✅ Diuji dengan fetch palsu (V8 dan QuickJS asli)
-- ⚠️ Belum terverifikasi di anichin.moe asli dan di aplikasi Nuvio
-- ⚠️ Cloudflare dapat memblokir akses otomatis (terlihat di kartu debug sebagai `diblokir 403`)
-- 
+Versi saat ini: **1.2.0**.
