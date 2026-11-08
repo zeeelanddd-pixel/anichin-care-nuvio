@@ -33,4 +33,4 @@ Provider mengembalikan array objek stream dengan `name`, `title`, `url`, `qualit
 
 Pemeriksaan otomatis memvalidasi sintaks JavaScript dan kontrak ekspor. Pengujian akhir tetap perlu dilakukan di Nuvio karena akses jaringan dan kompatibilitas playback bergantung pada runtime serta host sumber.
 
-Versi saat ini: **1.2.0**.
+Versi saat ini: **1.2.2**. Stream yang ditemukan dideduplikasi berdasarkan host dan path media, label server dipertahankan, dan resolusi hanya ditampilkan jika dapat dikenali dari label atau URL.
