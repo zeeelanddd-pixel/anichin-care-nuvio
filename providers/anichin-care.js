@@ -23,7 +23,7 @@ var DEBUG_STREAMS = true;  // true: bila hasil kosong, tampilkan kartu "debug" b
 var TMDB_KEY_MANUAL = '';  // opsional: isi API key TMDB milik Anda bila key bawaan Nuvio kosong/tidak valid
 // Nuvio menyuntikkan TMDB_API_KEY ke plugin; TMDB_KEY_MANUAL (jika diisi) diutamakan.
 var TMDB_KEY = TMDB_KEY_MANUAL || ((typeof TMDB_API_KEY !== 'undefined' && TMDB_API_KEY) ? String(TMDB_API_KEY) : '');
-var PLUGIN_VERSION = '1.1.2'; // muncul di log: pastikan versi inilah yang dimuat Nuvio
+var PLUGIN_VERSION = '1.1.3'; // muncul di log: pastikan versi inilah yang dimuat Nuvio
 var TOTAL_BUDGET = 40000;  // batas total satu panggilan getStreams (ms)
 var UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
@@ -473,9 +473,10 @@ function extractServers(html, pageUrl) {
   function push(url, label) {
     url = absUrl(url, pageUrl);
     var host = hostOf(url);
-    if (!url || !host || host === pageHost || seen[url] || skip.test(host)) return;
+    if (!url || !host || host === pageHost || seen[url] || skip.test(host)) return false;
     seen[url] = 1;
     servers.push({ url: url, label: String(label || host).replace(/\s+/g, ' ').trim() });
+    return true;
   }
 
   function fromSnippet(snippet, label) {
@@ -515,10 +516,6 @@ function extractServers(html, pageUrl) {
 
   // 3) iframe default (hanya bila tidak ada server lain, supaya iklan tidak ikut)
   if (!servers.length) {
-    var iRe = /<iframe\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi, im, n = 0;
-    while ((im = iRe.exec(html)) && n < 3) { push(im[1], 'Default'); n++; }
-  }
-  return servers;
-}
-
-/* ───────────── Resolver embed -> URL langsung ───────────── 
+    // batas dihitung dari server yang DITERIMA (iframe iklan yang dilewati tidak ikut dihitung)
+    var iRe = /<iframe\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi, im, n = 0, scanned = 0;
+    while ((im = iRe.exec(html
