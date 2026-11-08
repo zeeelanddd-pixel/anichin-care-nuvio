@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 20
       - name: Check JavaScript syntax
-        run: node --check providers/anichin-care.js
+        run: node --check providers/anichin-care.js && node --check providers/bilibili.js
       - name: Check provider contract
         run: node tests/provider-contract.test.js
       - name: Validate manifest JSON
