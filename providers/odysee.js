@@ -1,125 +1,120 @@
 /*
  * Odysee Public - Nuvio provider
- * Resolves one explicitly authorized public Odysee upload through Odysee's
- * public SDK proxy. It does not search unrelated uploads or construct CDN URLs.
+ * Searches Odysee's documented Lighthouse API and resolves only claims
+ * carrying an explicit reusable license (CC0, Public Domain, CC BY / BY-SA).
  */
-var VERSION = "1.0.0";
+var VERSION = "1.1.0";
 var PROVIDER = "Odysee";
-var API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
-var CLAIM_URI = "lbry://RI01:c";
-var CANONICAL_URL = "https://odysee.com/RI01:c";
+var SEARCH_API = "https://lighthouse.odysee.tv/search";
+var SDK_API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
+var PLAYER = "https://player.odycdn.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TMDB_API_KEY) : "";
-var TIMEOUT_MS = 25000;
+var MAX_RESULTS = 6;
+var TIMEOUT_MS = 28000;
 
-function log(msg) {
-  try { console.log("[OdyseePublic v" + VERSION + "] " + String(msg)); } catch (e) {}
-}
+function log(s) { try { console.log("[OdyseePublic v" + VERSION + "] " + s); } catch(e) {} }
 function clean(s) {
-  return String(s || "").replace(/<[^>]*>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'").replace(/\s+/g, " ").trim();
+  return String(s || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, function(_,x){return String.fromCharCode(parseInt(x,16));})
+    .replace(/&#([0-9]+);/g, function(_,x){return String.fromCharCode(parseInt(x,10));})
+    .replace(/\s+/g, " ").trim();
 }
-function norm(s) {
-  return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+function norm(s) { return clean(s).toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim(); }
+function titleScore(a,b) {
+  var x=norm(a).split(" "), y=norm(b).split(" "), set={}, hit=0, i;
+  for(i=0;i<y.length;i++) if(y[i]) set[y[i]]=1;
+  for(i=0;i<x.length;i++) if(x[i] && set[x[i]]) hit++;
+  return x.length && y.length ? 2*hit/(x.length+y.length) : 0;
 }
 function requestJson(url, method, body, deadline) {
-  if (Date.now() > deadline) return Promise.resolve(null);
-  var options = {
-    method: method || "GET",
-    headers: {
-      "User-Agent": UA,
-      "Accept": "application/json, text/plain, */*",
-      "Origin": "https://odysee.com",
-      "Referer": "https://odysee.com/"
-    },
-    redirect: "follow"
-  };
-  if (body !== null && body !== undefined) {
-    options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-  return fetch(url, options).then(function (r) {
-    if (!r || !r.ok) {
-      log("HTTP gagal: " + (r ? r.status : "no response"));
-      return null;
-    }
-    return r.text().then(function (raw) {
-      try { return JSON.parse(raw); }
-      catch (e) { log("Respons bukan JSON"); return null; }
-    });
-  }).catch(function (e) {
-    log("request error: " + (e && e.message ? e.message : e));
-    return null;
+  if(Date.now()>deadline) return Promise.resolve(null);
+  var opt={method:method||"GET",redirect:"follow",headers:{
+    "User-Agent":UA,"Accept":"application/json","Origin":"https://odysee.com","Referer":"https://odysee.com/"
+  }};
+  if(body!==null && body!==undefined) { opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(body); }
+  return fetch(url,opt).then(function(r){
+    if(!r || !r.ok) { log("HTTP "+(r?r.status:"no response")); return null; }
+    return r.text().then(function(t){try{return JSON.parse(t);}catch(e){return null;}});
+  }).catch(function(e){log("request error: "+(e&&e.message||e));return null;});
+}
+function tmdbTitle(id,type,deadline) {
+  if(!TMDB_KEY) { log("TMDB_API_KEY tidak tersedia"); return Promise.resolve(null); }
+  var kind=type==="movie"?"movie":"tv";
+  var url="https://api.themoviedb.org/3/"+kind+"/"+encodeURIComponent(id)+"?language=en-US&api_key="+encodeURIComponent(TMDB_KEY);
+  return requestJson(url,"GET",null,deadline).then(function(j){
+    var d=j&&(j.data||j), t=d&&(d.name||d.title||d.original_name||d.original_title);
+    return t?{title:String(t),original:String(d.original_name||d.original_title||t)}:null;
   });
 }
-function getTmdbTitle(id, type, deadline) {
-  if (!TMDB_KEY) return Promise.resolve(null);
-  var kind = type === "movie" ? "movie" : "tv";
-  var url = "https://api.themoviedb.org/3/" + kind + "/" +
-    encodeURIComponent(id) + "?language=en-US&api_key=" + encodeURIComponent(TMDB_KEY);
-  return requestJson(url, "GET", null, deadline).then(function (j) {
-    var d = j && (j.data || j);
-    var title = d && (d.name || d.title || d.original_name || d.original_title);
-    return title ? String(title) : null;
+function licensed(meta) {
+  var v=meta && (meta.value || meta);
+  var license=String((v && (v.license || (v.metadata && v.metadata.license))) || "").toLowerCase().replace(/[._-]+/g," ");
+  return /public domain|cc0|creative commons attribution(?: share alike)?|\bcc by(?: sa)?\b/.test(license);
+}
+function searchClaims(query,deadline) {
+  var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=20&from=0&claimType=stream&mediaType=video&nsfw=false";
+  return requestJson(url,"GET",null,deadline).then(function(rows){
+    if(!Array.isArray(rows)) return [];
+    return rows.filter(function(x){return x && x.name && x.claimId;});
   });
 }
-function findStreamingUrl(obj, depth) {
-  if (!obj || typeof obj !== "object" || depth > 5) return "";
-  if (typeof obj.streaming_url === "string" && /^https?:\/\//i.test(obj.streaming_url)) {
-    return obj.streaming_url;
-  }
-  if (typeof obj.streamingUrl === "string" && /^https?:\/\//i.test(obj.streamingUrl)) {
-    return obj.streamingUrl;
-  }
-  var keys = ["data", "result", "outputs", "value", "stream"];
-  for (var i = 0; i < keys.length; i++) {
-    if (obj[keys[i]] && typeof obj[keys[i]] === "object") {
-      var found = findStreamingUrl(obj[keys[i]], depth + 1);
-      if (found) return found;
-    }
-  }
-  return "";
-}
-function getStreams(tmdbId, mediaType, season, episode) {
-  var type = String(mediaType || "").toLowerCase();
-  type = type === "movie" || type === "film" ? "movie" : "tv";
-  var ep = Math.max(1, Number(episode) || 1);
-  if (type !== "tv" || ep !== 1) return Promise.resolve([]);
-  var deadline = Date.now() + TIMEOUT_MS;
-  return getTmdbTitle(tmdbId, type, deadline).then(function (title) {
-    // This provider is intentionally pinned to the one authorized claim supplied
-    // for the initial integration. It will not return unrelated search results.
-    if (!title || norm(title).indexOf("renegade immortal") < 0) {
-      log("judul tidak cocok dengan claim yang dikonfigurasi");
-      return [];
-    }
-    return requestJson(API, "POST", { uri: CLAIM_URI }, deadline).then(function (data) {
-      var streamUrl = findStreamingUrl(data, 0);
-      if (!streamUrl) {
-        log("Odysee tidak memberikan streaming_url publik untuk claim ini");
-        return [];
+function resolveClaim(item,deadline) {
+  var uri="lbry://"+item.name+":"+item.claimId;
+  return requestJson(SDK_API,"POST",{
+    jsonrpc:"2.0",id:1,method:"get",params:{uri:uri}
+  },deadline).then(function(j){
+    var claim=j&&(j.result||j.data||j);
+    if(Array.isArray(claim)) claim=claim[0];
+    if(!claim || !licensed(claim)) return null;
+    var value=claim.value || {};
+    var source=value.source || {};
+    var stream=claim.streaming_url || claim.streamingUrl || "";
+    if(!stream && claim.name && claim.claim_id) {
+      stream=PLAYER+"/api/v3/streams/free/"+encodeURIComponent(claim.name)+"/"+encodeURIComponent(claim.claim_id);
+      if(source.sd_hash && source.media_type) {
+        var ext=String(source.media_type).split("/").pop().replace(/[^a-z0-9]/gi,"");
+        stream+="/"+String(source.sd_hash).slice(0,6)+(ext?"."+ext:"");
       }
-      var lower = streamUrl.toLowerCase();
-      var quality = lower.indexOf("1080") >= 0 ? "1080p" :
-        lower.indexOf("720") >= 0 ? "720p" : "Auto";
-      log("stream publik berhasil di-resolve");
-      return [{
-        name: PROVIDER,
-        title: title + " • Episode 1",
-        url: streamUrl,
-        quality: quality,
-        headers: {
-          "Referer": CANONICAL_URL,
-          "Origin": "https://odysee.com",
-          "User-Agent": UA,
-          "Accept": "*/*"
-        }
-      }];
-    });
-  }).catch(function (e) {
-    log("getStreams error: " + (e && e.message ? e.message : e));
-    return [];
+    }
+    if(!/^https:\/\//i.test(stream)) return null;
+    return {url:stream,title:clean(claim.value && claim.value.title || item.name),license:String(value.license || (value.metadata&&value.metadata.license) || "")};
   });
 }
-module.exports = { getStreams: getStreams };
+function getStreams(tmdbId,mediaType,season,episode) {
+  var type=String(mediaType||"").toLowerCase();
+  type=(type==="movie"||type==="film")?"movie":"tv";
+  var ep=Math.max(1,Number(episode)||1), deadline=Date.now()+TIMEOUT_MS;
+  log("start type="+type+" tmdb="+tmdbId+" episode="+ep);
+  return tmdbTitle(tmdbId,type,deadline).then(function(meta){
+    if(!meta) return [];
+    var queries=type==="tv"?[
+      meta.title+" episode "+ep,meta.title+" ep "+ep,meta.title+" "+ep,
+      meta.original+" episode "+ep
+    ]:[meta.title,meta.original];
+    var unique={}, candidates=[];
+    return Promise.all(queries.filter(function(q){return !!q;}).map(function(q){return searchClaims(q,deadline);})).then(function(groups){
+      groups.forEach(function(group){group.forEach(function(item){
+        var key=item.claimId;
+        if(!unique[key]) { unique[key]=1; candidates.push(item); }
+      });});
+      candidates=candidates.filter(function(x){
+        var n=clean(x.name+" "+(x.title||""));
+        return titleScore(meta.title,n)>=0.25 || titleScore(meta.original,n)>=0.25;
+      }).slice(0,MAX_RESULTS*2);
+      if(!candidates.length) { log("hasil pencarian kosong"); return []; }
+      return Promise.all(candidates.map(function(x){return resolveClaim(x,deadline);})).then(function(resolved){
+        var out=[];
+        resolved.forEach(function(x){
+          if(!x || out.length>=MAX_RESULTS) return;
+          out.push({name:PROVIDER,title:x.title+" • "+x.license,url:x.url,quality:"Auto",
+            headers:{"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}});
+        });
+        log("stream berlisensi ditemukan: "+out.length);
+        return out;
+      });
+    });
+  }).catch(function(e){log("getStreams error: "+(e&&e.message||e));return [];});
+}
+module.exports={getStreams:getStreams};
