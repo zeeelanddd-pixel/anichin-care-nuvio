@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.0.1";
+var VERSION = "1.0.2";
 var PROVIDER = "Bilibili";
 var API = "https://api.bilibili.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -81,27 +81,40 @@ function tmdbTitle(id, type, deadline) {
   });
 }
 function searchVideos(title, episode, type, deadline) {
-  var query = title;
-  if (type === "tv") query += " episode " + episode;
-  var url = API + "/x/web-interface/search/type?search_type=video&page=1&order=totalrank&keyword=" + encodeURIComponent(query);
-  return requestJson(url, "https://search.bilibili.com/", deadline).then(function (j) {
-    var data = j && j.data;
-    var items = data && data.result;
-    if (!Array.isArray(items)) return [];
+  var queries = type === "tv" ? [
+    title + " episode " + episode,
+    title + " ep " + episode,
+    title + " " + episode,
+    title
+  ] : [title];
+  return Promise.all(queries.map(function (query) {
+    var url = API + "/x/web-interface/search/type?search_type=video&page=1&order=totalrank&keyword=" + encodeURIComponent(query);
+    return requestJson(url, "https://search.bilibili.com/", deadline).then(function (j) {
+      var items = j && j.data && j.data.result;
+      return Array.isArray(items) ? items : [];
+    });
+  })).then(function (groups) {
     var out = [], seen = {};
-    for (var i = 0; i < items.length; i++) {
-      var x = items[i] || {};
-      var name = clean(x.title || "");
-      var bvid = String(x.bvid || "");
-      var aid = Number(x.aid || 0);
-      if (!name || (!bvid && !aid)) continue;
-      var titleScore = score(title, name);
-      var epMatch = type !== "tv" || new RegExp("(?:第\\s*0*" + episode + "\\s*集|episode\\s*0*" + episode + "\\b|\\bep\\s*0*" + episode + "\\b|\\b0*" + episode + "\\s*/)").test(name.toLowerCase());
-      if (titleScore < 0.45 || !epMatch) continue;
-      var key = bvid || String(aid);
-      if (seen[key]) continue;
-      seen[key] = true;
-      out.push({ bvid: bvid, aid: aid, title: name, score: titleScore });
+    var ep = String(Math.max(1, Number(episode) || 1));
+    var epPattern = new RegExp(
+      "(?:第\\\\s*0*" + ep + "\\\\s*[集话話]|(?:episode|ep|e)\\\\s*0*" + ep + "\\\\b|(?:^|[\\\\s#_-])0*" + ep + "(?:集|话|話|期)?(?:$|[\\\\s#_.-]))",
+      "i"
+    );
+    for (var g = 0; g < groups.length; g++) {
+      for (var i = 0; i < groups[g].length; i++) {
+        var x = groups[g][i] || {};
+        var name = clean(x.title || "");
+        var bvid = String(x.bvid || "");
+        var aid = Number(x.aid || 0);
+        if (!name || (!bvid && !aid)) continue;
+        var titleScore = Math.max(score(title, name), score(title, name.replace(/(?:episode|ep|第)?\\\\s*0*\\\\d+\\\\s*(?:集|话|話)?/ig, " ")));
+        var epMatch = type !== "tv" || epPattern.test(name);
+        if (titleScore < 0.38 || !epMatch) continue;
+        var key = bvid || String(aid);
+        if (seen[key]) continue;
+        seen[key] = true;
+        out.push({ bvid: bvid, aid: aid, title: name, score: titleScore });
+      }
     }
     out.sort(function (a, b) { return b.score - a.score; });
     return out.slice(0, MAX_RESULTS);
