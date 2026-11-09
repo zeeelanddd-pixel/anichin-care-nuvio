@@ -3,7 +3,7 @@
  * Searches Odysee's documented Lighthouse API and resolves only claims
  * carrying an explicit reusable license (CC0, Public Domain, CC BY / BY-SA).
  */
-var VERSION = "1.1.1";
+var VERSION = "1.1.2";
 var PROVIDER = "Odysee";
 var SEARCH_API = "https://lighthouse.odysee.tv/search";
 var SDK_API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
@@ -11,7 +11,7 @@ var PLAYER = "https://player.odycdn.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TMDB_API_KEY) : "";
 var MAX_RESULTS = 6;
-var TIMEOUT_MS = 28000;
+var TIMEOUT_MS = 40000;
 
 function log(s) { try { console.log("[OdyseePublic v" + VERSION + "] " + s); } catch(e) {} }
 function clean(s) {
@@ -54,10 +54,10 @@ function licensed(meta) {
   return /public domain|cc0|creative commons attribution(?: share alike)?|\bcc by(?: sa)?\b/.test(license);
 }
 function searchClaims(query,deadline) {
-  var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=20&from=0&claimType=file&mediaType=video&nsfw=false&free_only=true";
+  var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=48&from=0&claimType=file&mediaType=video&nsfw=false&free_only=true";
   return requestJson(url,"GET",null,deadline).then(function(rows){
     if(!Array.isArray(rows)) { log("format hasil Lighthouse tidak sesuai"); return []; }
-    log("hasil Lighthouse untuk \"" + query + "\": " + rows.length);
+    log("Lighthouse \"" + query + "\" menghasilkan " + rows.length + " kandidat");
     return rows.filter(function(x){return x && x.name && x.claimId;});
   });
 }
@@ -94,7 +94,7 @@ function getStreams(tmdbId,mediaType,season,episode) {
     log("judul TMDB: " + meta.title + " / " + meta.original);
     var queries=type==="tv"?[
       meta.title+" episode "+ep,meta.title+" ep "+ep,meta.title+" "+ep,
-      meta.original+" episode "+ep
+      meta.original+" episode "+ep,meta.title,meta.original
     ]:[meta.title,meta.original];
     var unique={}, candidates=[];
     return Promise.all(queries.filter(function(q){return !!q;}).map(function(q){return searchClaims(q,deadline);})).then(function(groups){
@@ -105,8 +105,9 @@ function getStreams(tmdbId,mediaType,season,episode) {
       candidates=candidates.filter(function(x){
         var n=clean(x.name+" "+(x.title||""));
         return titleScore(meta.title,n)>=0.25 || titleScore(meta.original,n)>=0.25;
-      }).slice(0,MAX_RESULTS*2);
-      if(!candidates.length) { log("hasil pencarian kosong"); return []; }
+      }).slice(0,MAX_RESULTS*3);
+      log("kandidat cocok setelah pencocokan judul: "+candidates.length);
+      if(!candidates.length) { log("tidak ada kandidat judul yang cocok; tidak ada permintaan resolusi claim"); return []; }
       return Promise.all(candidates.map(function(x){return resolveClaim(x,deadline);})).then(function(resolved){
         var out=[];
         resolved.forEach(function(x){
