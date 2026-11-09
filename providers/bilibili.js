@@ -44,7 +44,7 @@ function requestJson(url, referer, deadline) {
   };
   return fetch(url, { method: "GET", headers: headers, redirect: "follow" }).then(function (r) {
     if (!r || !r.ok) {
-      log("HTTP request gagal: " + (r ? r.status : "no response"));
+      log("HTTP request failed: " + (r ? r.status : "no response"));
       return null;
     }
     return r.text().then(function (body) {
@@ -56,7 +56,7 @@ function requestJson(url, referer, deadline) {
         }
         return data;
       } catch (e) {
-        log("Respons API bukan JSON");
+        log("API response is not valid JSON");
         return null;
       }
     });
@@ -67,7 +67,7 @@ function requestJson(url, referer, deadline) {
 }
 function tmdbTitle(id, type, deadline) {
   if (!TMDB_KEY) {
-    log("TMDB_API_KEY tidak tersedia di runtime Nuvio");
+    log("TMDB_API_KEY is not available in the Nuvio runtime");
     return Promise.resolve(null);
   }
   var kind = type === "movie" ? "movie" : "tv";
@@ -201,7 +201,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
       items.sort(function (a, b) { return b.score - a.score; });
       items = items.slice(0, MAX_RESULTS);
       if (!items.length) {
-        log("tidak ada video publik yang cocok");
+        log("No matching public videos found");
         return [];
       }
       return Promise.all(items.map(function (item) {
@@ -219,7 +219,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
             if (out.length >= MAX_RESULTS) return out;
           }
         }
-        log("stream publik ditemukan: " + out.length);
+        log("Public streams found: " + out.length);
         return out;
       });
     });
