@@ -3,7 +3,7 @@
  * Searches Odysee's documented Lighthouse API and resolves only claims
  * carrying an explicit reusable license (CC0, Public Domain, CC BY / BY-SA).
  */
-var VERSION = "1.1.0";
+var VERSION = "1.1.1";
 var PROVIDER = "Odysee";
 var SEARCH_API = "https://lighthouse.odysee.tv/search";
 var SDK_API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
@@ -54,9 +54,10 @@ function licensed(meta) {
   return /public domain|cc0|creative commons attribution(?: share alike)?|\bcc by(?: sa)?\b/.test(license);
 }
 function searchClaims(query,deadline) {
-  var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=20&from=0&claimType=stream&mediaType=video&nsfw=false";
+  var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=20&from=0&claimType=file&mediaType=video&nsfw=false&free_only=true";
   return requestJson(url,"GET",null,deadline).then(function(rows){
-    if(!Array.isArray(rows)) return [];
+    if(!Array.isArray(rows)) { log("format hasil Lighthouse tidak sesuai"); return []; }
+    log("hasil Lighthouse untuk \"" + query + "\": " + rows.length);
     return rows.filter(function(x){return x && x.name && x.claimId;});
   });
 }
@@ -67,7 +68,8 @@ function resolveClaim(item,deadline) {
   },deadline).then(function(j){
     var claim=j&&(j.result||j.data||j);
     if(Array.isArray(claim)) claim=claim[0];
-    if(!claim || !licensed(claim)) return null;
+    if(!claim) { log("claim tidak berhasil di-resolve: " + item.name); return null; }
+    if(!licensed(claim)) { log("claim dilewati: lisensi penggunaan ulang tidak terverifikasi"); return null; }
     var value=claim.value || {};
     var source=value.source || {};
     var stream=claim.streaming_url || claim.streamingUrl || "";
@@ -88,7 +90,8 @@ function getStreams(tmdbId,mediaType,season,episode) {
   var ep=Math.max(1,Number(episode)||1), deadline=Date.now()+TIMEOUT_MS;
   log("start type="+type+" tmdb="+tmdbId+" episode="+ep);
   return tmdbTitle(tmdbId,type,deadline).then(function(meta){
-    if(!meta) return [];
+    if(!meta) { log("metadata TMDB tidak tersedia; periksa TMDB_API_KEY dan ID katalog"); return []; }
+    log("judul TMDB: " + meta.title + " / " + meta.original);
     var queries=type==="tv"?[
       meta.title+" episode "+ep,meta.title+" ep "+ep,meta.title+" "+ep,
       meta.original+" episode "+ep
