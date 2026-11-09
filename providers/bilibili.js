@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.0.3";
+var VERSION = "1.0.4";
 var PROVIDER = "Bilibili";
 var API = "https://api.bilibili.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -143,27 +143,40 @@ function videoInfo(item, deadline) {
   });
 }
 function playUrl(info, deadline) {
+  var referer = "https://www.bilibili.com/video/" + info.bvid + "/";
   var url = API + "/x/player/playurl?bvid=" + encodeURIComponent(info.bvid) +
-    "&cid=" + info.cid + "&qn=80&fnver=0&fnval=0&fourk=0";
-  return requestJson(url, "https://www.bilibili.com/video/" + info.bvid + "/", deadline).then(function (j) {
+    "&cid=" + info.cid + "&qn=64&fnver=0&fnval=0&fourk=0";
+  return requestJson(url, referer, deadline).then(function (j) {
     var d = j && j.data;
-    var urls = [];
+    var urls = [], seen = {};
+    function addUrl(u) {
+      if (typeof u !== "string" || !/^https?:\/\//i.test(u) || seen[u]) return;
+      seen[u] = true;
+      urls.push(u);
+    }
     if (d && Array.isArray(d.durl)) {
       for (var i = 0; i < d.durl.length; i++) {
         var part = d.durl[i] || {};
-        if (part.url && /^https?:\/\//i.test(part.url)) urls.push(part.url);
-        if (urls.length >= 4) break;
+        addUrl(part.url);
+        if (Array.isArray(part.backup_url)) {
+          for (var b = 0; b < part.backup_url.length; b++) addUrl(part.backup_url[b]);
+        }
       }
     }
     var quality = d && d.quality ? String(d.quality) : "";
     var label = quality === "80" ? "1080p" : quality === "64" ? "720p" : quality === "32" ? "480p" : "Auto";
-    return urls.map(function (u, i) {
+    return urls.slice(0, MAX_RESULTS).map(function (u, i) {
       return {
         name: PROVIDER,
-        title: info.title + (urls.length > 1 ? " • Part " + (i + 1) : ""),
+        title: info.title + (urls.length > 1 ? " • CDN " + (i + 1) : ""),
         url: u,
         quality: label,
-        headers: { "Referer": "https://www.bilibili.com/video/" + info.bvid + "/", "User-Agent": UA }
+        headers: {
+          "Referer": referer,
+          "Origin": "https://www.bilibili.com",
+          "User-Agent": UA,
+          "Accept": "*/*"
+        }
       };
     });
   });
