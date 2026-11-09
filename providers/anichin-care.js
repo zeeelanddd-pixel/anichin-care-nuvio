@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.4";
+var VERSION = "1.2.5";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -233,12 +233,51 @@ function directMediaUrls(html, pageUrl) {
   }
   return found;
 }
+function resolveRumble(server, deadline) {
+  var m = /rumble\.com\/embed\/([a-z0-9]+)/i.exec(server.url);
+  if (!m) return Promise.resolve([]);
+  var embedId = m[1];
+  var apiUrl = "https://rumble.com/embedJS/u3/?request=video&ver=2&v=" + encodeURIComponent(embedId);
+  return fetchText(apiUrl, server.url, deadline).then(function (r) {
+    if (!r) return [];
+    try {
+      var data = JSON.parse(r.text);
+      var formats = data && data.ua && data.ua.mp4;
+      var out = [], seen = {};
+      if (formats && typeof formats === "object") {
+        Object.keys(formats).forEach(function (key) {
+          var item = formats[key] || {};
+          var u = String(item.url || "");
+          if (!/^https?:\/\//i.test(u) || seen[u]) return;
+          seen[u] = true;
+          var meta = item.meta || {};
+          var height = Number(meta.h || meta.height || key || 0);
+          var width = Number(meta.w || meta.width || 0);
+          var quality = height > 0 ? height + "p" : (/^\d+$/.test(key) ? key + "p" : "Auto");
+          out.push({ url: u, label: quality, quality: quality, width: width, height: height, referer: server.url });
+        });
+      }
+      out.sort(function (a, b) { return (b.height || 0) - (a.height || 0); });
+      if (out.length) {
+        log("Rumble menyediakan " + out.length + " varian MP4 publik");
+        return out.slice(0, MAX_RESULTS);
+      }
+    } catch (e) {
+      log("metadata kualitas Rumble tidak dapat dibaca");
+    }
+    var fallback = directMediaUrls(r.text, r.url);
+    return fallback.map(function (u) {
+      return { url: u, label: server.label, referer: server.url };
+    });
+  });
+}
 function resolveServer(server, deadline) {
   if (/\.(m3u8|mp4)(?:$|[?#])/i.test(server.url)) {
     return Promise.resolve([{ url: server.url, label: server.label, referer: BASE + "/" }]);
   }
   var h = hostOf(server.url);
   if (!/^(ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net)$/.test(h)) return Promise.resolve([]);
+  if (h === "rumble.com" && /\/embed\//i.test(server.url)) return resolveRumble(server, deadline);
   return fetchText(server.url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
     var urls = directMediaUrls(r.text, r.url);
