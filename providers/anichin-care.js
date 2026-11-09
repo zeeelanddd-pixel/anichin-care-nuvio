@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.7";
+var VERSION = "1.2.8";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -218,29 +218,56 @@ function parseServerLinks(html, pageUrl) {
   return out;
 }
 function directMediaUrls(html, pageUrl) {
-  // Extract actual media files from public embed metadata, never the watch page.
   var text = String(html || "").replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/&amp;/g, "&");
   var found = [], seen = {};
   function add(raw) {
     var u = String(raw || "").replace(/\\\//g, "/").replace(/\\u0026/g, "&").trim();
     u = absUrl(u, pageUrl);
     if (!u || !/\.(?:m3u8|mp4)(?:$|[?#])/i.test(u) || seen[u]) return;
-    var h = hostOf(u);
-    if (!h || h === "ok.ru" || h === "www.ok.ru") return;
+    if (!hostOf(u)) return;
     seen[u] = true;
     found.push(u);
   }
-  var re = /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi, m;
-  while ((m = re.exec(text))) {
-    add(m[0].replace(/[),;]+$/, ""));
+  function walk(value, depth) {
+    if (depth > 8 || value == null) return;
+    if (typeof value === "string") {
+      var re = /https?:[^"'\s<>]+/gi, m;
+      while ((m = re.exec(value))) {
+        add(m[0].replace(/[),;]+$/, ""));
+        if (found.length >= MAX_RESULTS) return;
+      }
+    } else if (Array.isArray(value)) {
+      for (var i = 0; i < value.length && found.length < MAX_RESULTS; i++) walk(value[i], depth + 1);
+    } else if (typeof value === "object") {
+      var keys = Object.keys(value);
+      for (var j = 0; j < keys.length && found.length < MAX_RESULTS; j++) walk(value[keys[j]], depth + 1);
+    }
+  }
+
+  // OK.ru menyematkan metadata JSON sebagai string pada halaman embed publik.
+  var decoded = decodeHtml(text);
+  var marker = /["']metadata["']\s*:\s*"/g, mm;
+  while ((mm = marker.exec(decoded))) {
+    var pos = marker.lastIndex, escaped = "", inEscape = false, closed = false;
+    for (var k = pos; k < decoded.length; k++) {
+      var ch = decoded.charAt(k);
+      if (ch === '"' && !inEscape) { closed = true; break; }
+      escaped += ch;
+      if (ch === "\\") inEscape = true;
+      else inEscape = false;
+    }
+    if (closed) {
+      try {
+        var metadataText = JSON.parse('"' + escaped + '"');
+        walk(JSON.parse(metadataText), 0);
+      } catch (e) {}
+    }
     if (found.length >= MAX_RESULTS) break;
   }
-  var keyPattern = /["'](?:hlsMasterPlaylistUrl|hlsManifestUrl|ondemandHls|videoUrl|file|url)["']\s*:\s*["']([^"']+)["']/gi, km;
-  while ((km = keyPattern.exec(text))) {
-    add(km[1]);
-    if (found.length >= MAX_RESULTS) break;
-  }
-  return found;
+
+  // Fallback untuk URL media langsung yang dipublikasikan pada HTML/JSON.
+  if (found.length < MAX_RESULTS) walk(text, 0);
+  return found.slice(0, MAX_RESULTS);
 }
 function resolveRumble(server, deadline) {
   var m = /rumble\.com\/embed\/([a-z0-9]+)/i.exec(server.url);
