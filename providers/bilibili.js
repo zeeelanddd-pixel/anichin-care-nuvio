@@ -22,10 +22,14 @@ function clean(s) {
     .replace(/\s+/g, " ").trim();
 }
 function norm(s) {
-  return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return clean(s).toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function score(a, b) {
-  var aa = norm(a).split(" "), bb = norm(b).split(" "), set = {}, hit = 0;
+  var na = norm(a), nb = norm(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.indexOf(nb) >= 0 || nb.indexOf(na) >= 0) return 0.9;
+  var aa = na.split(" "), bb = nb.split(" "), set = {}, hit = 0;
   for (var i = 0; i < bb.length; i++) if (bb[i]) set[bb[i]] = true;
   for (var j = 0; j < aa.length; j++) if (aa[j] && set[aa[j]]) hit++;
   return aa.length && bb.length ? 2 * hit / (aa.length + bb.length) : 0;
@@ -72,7 +76,8 @@ function tmdbTitle(id, type, deadline) {
   return requestJson(url, "https://www.themoviedb.org/", deadline).then(function (j) {
     var d = j && (j.data || j);
     var title = d && (d.name || d.title || d.original_name || d.original_title);
-    return title ? String(title) : null;
+    if (!title) return null;
+    return { title: String(title), originalTitle: String(d.original_name || d.original_title || title) };
   });
 }
 function searchVideos(title, episode, type, deadline) {
@@ -142,10 +147,19 @@ function getStreams(tmdbId, mediaType, season, episode) {
   var ep = Math.max(1, Number(episode) || 1);
   var deadline = Date.now() + TIMEOUT_MS;
   log("start type=" + type + " tmdb=" + tmdbId + (type === "tv" ? " episode=" + ep : ""));
-  return tmdbTitle(tmdbId, type, deadline).then(function (title) {
-    if (!title) return [];
-    log("TMDB title: " + title);
-    return searchVideos(title, ep, type, deadline).then(function (items) {
+  return tmdbTitle(tmdbId, type, deadline).then(function (meta) {
+    if (!meta || !meta.title) return [];
+    log("TMDB title: " + meta.title + " / original: " + meta.originalTitle);
+    var queries = [meta.title];
+    if (meta.originalTitle && norm(meta.originalTitle) !== norm(meta.title)) queries.push(meta.originalTitle);
+    return Promise.all(queries.map(function (q) { return searchVideos(q, ep, type, deadline); })).then(function (groups) {
+      var items = [], itemSeen = {};
+      for (var gi = 0; gi < groups.length; gi++) for (var gj = 0; gj < groups[gi].length; gj++) {
+        var candidate = groups[gi][gj], key = candidate.bvid || String(candidate.aid);
+        if (!itemSeen[key]) { itemSeen[key] = true; items.push(candidate); }
+      }
+      items.sort(function (a, b) { return b.score - a.score; });
+      items = items.slice(0, MAX_RESULTS);
       if (!items.length) {
         log("tidak ada video publik yang cocok");
         return [];
