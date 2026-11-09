@@ -1,6 +1,6 @@
 {
   "name": "Anichin Providers",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Kumpulan provider video donghua dan animasi untuk Nuvio",
   "author": "zeeelanddd-pixel",
   "scrapers": [
@@ -49,7 +49,7 @@
       "id": "odysee-public",
       "name": "Odysee",
       "description": "Provider Odysee untuk claim publik yang telah diotorisasi.",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "tv"
