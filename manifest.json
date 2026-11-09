@@ -1,6 +1,6 @@
 {
   "name": "Anichin Providers",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Kumpulan provider video donghua dan animasi untuk Nuvio",
   "author": "zeeelanddd-pixel",
   "scrapers": [
@@ -28,7 +28,7 @@
       "id": "bilibili-public",
       "name": "Bilibili",
       "description": "Provider video publik Bilibili. Hanya konten yang dapat diputar melalui API publik.",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
