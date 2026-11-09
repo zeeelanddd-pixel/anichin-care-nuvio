@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.6";
+var VERSION = "1.2.7";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -196,7 +196,7 @@ function parseServerLinks(html, pageUrl) {
     var u = absUrl(im ? im[1] : (sm ? sm[1] : decoded), pageUrl);
     var h = hostOf(u);
     if (!u || !h || h === hostOf(pageUrl) || seen[u]) return;
-    if (!/^(ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net)$/.test(h) && !/\.(m3u8|mp4)(?:$|[?#])/i.test(u)) return;
+    if (!/^(ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net|d\.tube|dtube\.video|odysee\.com|odysee\.tv|lbry\.tv)$/.test(h) && !/\.(m3u8|mp4)(?:$|[?#])/i.test(u)) return;
     seen[u] = true; out.push({ url: u, label: stripTags(label) || h });
   }
   var sel = /<select\b[^>]*(?:class|name)=["'][^"']*mirror[^"']*["'][^>]*>([\s\S]*?)<\/select>/gi, sm;
@@ -285,7 +285,7 @@ function resolveServer(server, deadline) {
     return Promise.resolve([{ url: server.url, label: server.label, referer: BASE + "/" }]);
   }
   var h = hostOf(server.url);
-  if (!/^(ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net)$/.test(h)) return Promise.resolve([]);
+  if (!/^(ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net|d\.tube|dtube\.video|odysee\.com|odysee\.tv|lbry\.tv)$/.test(h)) return Promise.resolve([]);
   if (h === "rumble.com" && /\/embed\//i.test(server.url)) return resolveRumble(server, deadline);
   return fetchText(server.url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
