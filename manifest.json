@@ -1,13 +1,13 @@
 {
   "name": "Anichin Providers",
   "version": "1.4.2",
-  "description": "Kumpulan provider video donghua dan animasi untuk Nuvio",
+  "description": "Multi-source donghua and animation streaming providers for Nuvio",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin-care",
       "name": "Anichin",
-      "description": "Provider video film dan serial dari Anichin",
+      "description": "Movie and series provider using publicly accessible Anichin pages",
       "version": "1.2.8",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
@@ -27,7 +27,7 @@
     {
       "id": "bilibili-public",
       "name": "Bilibili",
-      "description": "Provider video publik Bilibili. Hanya konten yang dapat diputar melalui API publik.",
+      "description": "Public Bilibili video provider using the official web API",
       "version": "1.0.4",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
@@ -48,7 +48,7 @@
     {
       "id": "odysee-public",
       "name": "Odysee",
-      "description": "Provider Odysee untuk claim publik yang telah diotorisasi.",
+      "description": "Odysee provider for public claims with a verifiable reusable license",
       "version": "1.1.2",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
