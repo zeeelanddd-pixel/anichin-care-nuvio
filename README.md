@@ -12,8 +12,9 @@ Tambahkan URL berikut pada menu Plugins Nuvio:
 
 - **Anichin** — mencari mirror publik dari halaman Anichin. Implementasi: `providers/anichin-care.js`.
 - **Bilibili** — mencari video publik melalui API web Bilibili dan meminta URL playback yang disediakan API. Implementasi: `providers/bilibili.js`.
+- **Odysee** — me-resolve claim publik yang telah diotorisasi melalui SDK proxy resmi Odysee. Implementasi: `providers/odysee.js`. Integrasi awal dibatasi ke claim yang dikonfigurasi.
 
-Keduanya terdaftar terpisah di Nuvio. Provider Bilibili tidak memakai cookie login, tidak melewati pembatasan wilayah, paywall, DRM, challenge, atau kontrol akses. Hanya URL playback langsung yang diberikan oleh API publik dan kompatibel dengan pemutar yang akan dikembalikan. Konten yang memerlukan login atau tidak diizinkan untuk playback publik dapat menghasilkan daftar kosong.
+Keduanya terdaftar terpisah di Nuvio. Provider Bilibili tidak memakai cookie login, tidak melewati pembatasan wilayah, paywall, DRM, challenge, atau kontrol akses. Provider Odysee hanya mengembalikan URL streaming yang diberikan API publik untuk claim yang dikonfigurasi, tanpa membuat URL CDN sendiri atau mencari unggahan lain. Hanya URL playback langsung yang diberikan oleh API publik dan kompatibel dengan pemutar yang akan dikembalikan. Konten yang memerlukan login atau tidak diizinkan untuk playback publik dapat menghasilkan daftar kosong.
 
 ## Kontrak
 
