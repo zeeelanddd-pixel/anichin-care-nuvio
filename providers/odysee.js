@@ -88,7 +88,7 @@ function getStreams(tmdbId,mediaType,season,episode) {
   var type=String(mediaType||"").toLowerCase();
   type=(type==="movie"||type==="film")?"movie":"tv";
   var ep=Math.max(1,Number(episode)||1), deadline=Date.now()+TIMEOUT_MS;
-  log("start type="+type+" tmdb="+tmdbId+" episode="+ep);
+  log("Starting lookup: type="+type+" tmdb="+tmdbId+" episode="+ep);
   return tmdbTitle(tmdbId,type,deadline).then(function(meta){
     if(!meta) { log("TMDB metadata is unavailable; check TMDB_API_KEY and the catalog ID"); return []; }
     log("TMDB title: " + meta.title + " / " + meta.original);
@@ -103,11 +103,13 @@ function getStreams(tmdbId,mediaType,season,episode) {
         if(!unique[key]) { unique[key]=1; candidates.push(item); }
       });});
       candidates=candidates.filter(function(x){
-        var n=clean(x.name+" "+(x.title||""));
-        return titleScore(meta.title,n)>=0.25 || titleScore(meta.original,n)>=0.25;
-      }).slice(0,MAX_RESULTS*3);
-      log("candidates cocok setelah pencocokan judul: "+candidates.length);
-      if(!candidates.length) { log("tidak ada candidates judul yang cocok; tidak ada permintaan resolusi claim"); return []; }
+        var searchable=clean([x.title,x.name,x.description,x.channel].join(" "));
+        var best=Math.max(titleScore(meta.title,searchable),titleScore(meta.original,searchable));
+        x.matchScore=best;
+        return best>=0.12;
+      }).sort(function(a,b){return b.matchScore-a.matchScore;}).slice(0,MAX_RESULTS*3);
+      log("Title-matched candidates: "+candidates.length);
+      if(!candidates.length) { log("No candidates passed title matching; claim resolution was skipped"); return []; }
       return Promise.all(candidates.map(function(x){return resolveClaim(x,deadline);})).then(function(resolved){
         var out=[];
         resolved.forEach(function(x){
@@ -115,7 +117,7 @@ function getStreams(tmdbId,mediaType,season,episode) {
           out.push({name:PROVIDER,title:x.title+" • "+x.license,url:x.url,quality:"Auto",
             headers:{"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}});
         });
-        log("Licensed streams found: "+out.length);
+        log("Verified reusable-license streams found: "+out.length);
         return out;
       });
     });
