@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.5";
+var VERSION = "1.2.6";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -218,18 +218,27 @@ function parseServerLinks(html, pageUrl) {
   return out;
 }
 function directMediaUrls(html, pageUrl) {
+  // Extract actual media files from public embed metadata, never the watch page.
   var text = String(html || "").replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/&amp;/g, "&");
-  var found = [], seen = {}, re = /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi, m;
-  while ((m = re.exec(text))) {
-    var u = m[0].replace(/\\\//g, "/").replace(/[),;]+$/, "");
+  var found = [], seen = {};
+  function add(raw) {
+    var u = String(raw || "").replace(/\\\//g, "/").replace(/\\u0026/g, "&").trim();
     u = absUrl(u, pageUrl);
-    if (u && !seen[u]) { seen[u] = true; found.push(u); }
+    if (!u || !/\.(?:m3u8|mp4)(?:$|[?#])/i.test(u) || seen[u]) return;
+    var h = hostOf(u);
+    if (!h || h === "ok.ru" || h === "www.ok.ru") return;
+    seen[u] = true;
+    found.push(u);
+  }
+  var re = /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi, m;
+  while ((m = re.exec(text))) {
+    add(m[0].replace(/[),;]+$/, ""));
     if (found.length >= MAX_RESULTS) break;
   }
-  var keyPattern = /["'](?:hlsMasterPlaylistUrl|hlsManifestUrl|ondemandHls|videoUrl|file)["']\s*:\s*["']([^"']+)["']/gi, km;
+  var keyPattern = /["'](?:hlsMasterPlaylistUrl|hlsManifestUrl|ondemandHls|videoUrl|file|url)["']\s*:\s*["']([^"']+)["']/gi, km;
   while ((km = keyPattern.exec(text))) {
-    var ku = absUrl(km[1].replace(/\\\//g, "/"), pageUrl);
-    if (ku && /\.(m3u8|mp4)(?:$|[?#])/i.test(ku) && !seen[ku]) { seen[ku] = true; found.push(ku); }
+    add(km[1]);
+    if (found.length >= MAX_RESULTS) break;
   }
   return found;
 }
@@ -344,16 +353,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
                 var dedupeKey = host + path + "?" + (canonical.indexOf("?") >= 0 ? canonical.substring(canonical.indexOf("?") + 1) : "");
                 if (seen[dedupeKey]) continue;
                 seen[dedupeKey] = true;
+                // Expose direct media files only, not OK.ru watch/embed pages.
+                if (!/\.(?:m3u8|mp4)(?:$|[?#])/i.test(item.url)) continue;
                 var label = stripTags(item.label || "").replace(/[ \t\r\n]+/g, " ").trim();
                 var hostLabel = host === "ok.ru" || host === "odnoklassniki.ru" ? "OK.ru" :
-                  host === "rumble.com" ? "Rumble" :
+                  host === "rumble.com" || /rumble\.cloud$/i.test(host) ? "Rumble" :
                   host === "dailymotion.com" || host === "dmcdn.net" ? "Dailymotion" : host;
                 if (!label || /^(server|mirror|auto)$/i.test(label)) label = hostLabel || "Server";
                 var resolution = /(?:^|[^0-9])(2160|1440|1080|720|480|360)p(?:[^0-9]|$)/i.exec(label + " " + item.url);
                 var displayQuality = resolution ? resolution[1] + "p" : label;
                 streams.push({
-                  name: PROVIDER,
-                  title: label + (resolution ? " • " + resolution[1] + "p" : ""),
+                  name: hostLabel || PROVIDER,
+                  title: label + " • " + (hostLabel || PROVIDER) + (resolution ? " • " + resolution[1] + "p" : ""),
                   url: item.url,
                   quality: displayQuality,
                   headers: { "Referer": item.referer || page.url, "User-Agent": UA }
