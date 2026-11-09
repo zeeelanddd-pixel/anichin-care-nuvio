@@ -1,7 +1,7 @@
 /*
  * Anichin Care - Nuvio provider
- * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
- * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
+ * Uses only publicly accessible pages and media URLs.
+ * Does not bypass challenges, login requirements, tokens, or access restrictions.
  */
 var VERSION = "1.2.8";
 var PROVIDER = "Anichin";
@@ -68,7 +68,7 @@ function fetchText(url, referer, deadline) {
     return r.text().then(function (body) {
       var status = Number(r.status || 0);
       if (status === 403 || status === 429 || status === 503) {
-        log("akses ditolak HTTP " + status + " pada " + hostOf(url) + "; tidak mencoba melewati pembatasan");
+        log("Access denied with HTTP " + status + " pada " + hostOf(url) + "; access restrictions will not be bypassed");
         return null;
       }
       if (status < 200 || status >= 400) return null;
@@ -79,13 +79,13 @@ function fetchText(url, referer, deadline) {
       return { url: r.url || url, text: String(body || ""), status: status };
     });
   }).catch(function (e) {
-    log("request gagal " + hostOf(url) + ": " + (e && e.message ? e.message : e));
+    log("Request failed for " + hostOf(url) + ": " + (e && e.message ? e.message : e));
     return null;
   });
 }
 function tmdbTitle(id, type, deadline) {
   if (!TMDB_KEY) {
-    log("TMDB_API_KEY tidak tersedia di runtime Nuvio");
+    log("TMDB_API_KEY is not available in the Nuvio runtime");
     return Promise.resolve(null);
   }
   var kind = type === "movie" ? "movie" : "tv";
@@ -244,7 +244,7 @@ function directMediaUrls(html, pageUrl) {
     }
   }
 
-  // OK.ru menyematkan metadata JSON sebagai string pada halaman embed publik.
+  // OK.ru embeds JSON metadata as a string in its public embed page.
   var decoded = decodeHtml(text);
   var marker = /["']metadata["']\s*:\s*"/g, mm;
   while ((mm = marker.exec(decoded))) {
@@ -299,7 +299,7 @@ function resolveRumble(server, deadline) {
         return out.slice(0, MAX_RESULTS);
       }
     } catch (e) {
-      log("metadata kualitas Rumble tidak dapat dibaca");
+      log("Unable to read Rumble quality metadata");
     }
     var fallback = directMediaUrls(r.text, r.url);
     return fallback.map(function (u) {
@@ -333,9 +333,9 @@ function getStreams(tmdbId, mediaType, season, episode) {
   log("start type=" + type + " id=" + tmdbId + (type === "tv" ? " S" + s + "E" + e : ""));
   return tmdbTitle(tmdbId, type, deadline).then(function (meta) {
     if (!meta || !meta.title) return [];
-    log("judul TMDB: " + meta.title);
+    log("TMDB title: " + meta.title);
     return findSeries(meta.title, s, deadline).then(function (candidates) {
-      if (!candidates.length) { log("judul tidak ditemukan pada pencarian publik"); return []; }
+      if (!candidates.length) { log("Title not found in public search results"); return []; }
       var pageTasks = [];
       for (var i = 0; i < candidates.length; i++) {
         (function (candidate) {
@@ -353,12 +353,12 @@ function getStreams(tmdbId, mediaType, season, episode) {
       return Promise.all(pageTasks).then(function (results) {
         var chosen = null;
         for (var k = 0; k < results.length; k++) if (results[k]) { chosen = results[k]; break; }
-        if (!chosen) { log("halaman/episode yang cocok tidak ditemukan"); return []; }
+        if (!chosen) { log("No matching page or episode was found"); return []; }
         var pagePromise = chosen.page ? Promise.resolve(chosen.page) : fetchText(chosen.pageUrl, BASE + "/", deadline);
         return pagePromise.then(function (page) {
           if (!page) return [];
           var servers = parseServerLinks(page.text, page.url);
-          log("mirror ditemukan: " + servers.length);
+          log("Mirrors found: " + servers.length);
           if (!servers.length) return [];
           var tasks = [];
           for (var n = 0; n < servers.length; n++) tasks.push(resolveServer(servers[n], deadline));
@@ -368,9 +368,9 @@ function getStreams(tmdbId, mediaType, season, episode) {
               for (var b = 0; b < resolved[a].length; b++) {
                 var item = resolved[a][b];
                 if (!item.url) continue;
-                // Buang query token sementara agar URL media yang sama tidak muncul berkali-kali.
-                // URL media bertanda tangan dapat memakai path sama dengan token berbeda.
-                // Pertahankan varian query agar URL valid tidak terbuang.
+                // Remove temporary query tokens to avoid duplicate media URLs.
+                // Signed media URLs may share the same path but use different tokens.
+                // Keep query variants so valid URLs are not discarded.
                 var canonical = String(item.url).split("#")[0];
                 var host = hostOf(item.url);
                 var hostEnd = canonical.indexOf("://");
@@ -400,7 +400,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
               }
               if (streams.length >= MAX_RESULTS) break;
             }
-            log("stream langsung ditemukan: " + streams.length);
+            log("Direct streams found: " + streams.length);
             return streams;
           });
         });
