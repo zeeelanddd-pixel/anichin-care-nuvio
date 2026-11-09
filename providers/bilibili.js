@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.0.2";
+var VERSION = "1.0.3";
 var PROVIDER = "Bilibili";
 var API = "https://api.bilibili.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -97,7 +97,7 @@ function searchVideos(title, episode, type, deadline) {
     var out = [], seen = {};
     var ep = String(Math.max(1, Number(episode) || 1));
     var epPattern = new RegExp(
-      "(?:第\\\\s*0*" + ep + "\\\\s*[集话話]|(?:episode|ep|e)\\\\s*0*" + ep + "\\\\b|(?:^|[\\\\s#_-])0*" + ep + "(?:集|话|話|期)?(?:$|[\\\\s#_.-]))",
+      "(?:第\\s*0*" + ep + "\\s*[集话話]|(?:episode|ep|e)\\s*0*" + ep + "\\b|(?:^|[\\s#_-])0*" + ep + "(?:集|话|話|期)?(?:$|[\\s#_.-]))",
       "i"
     );
     for (var g = 0; g < groups.length; g++) {
@@ -124,8 +124,22 @@ function videoInfo(item, deadline) {
   var key = item.bvid ? "bvid=" + encodeURIComponent(item.bvid) : "aid=" + item.aid;
   return requestJson(API + "/x/web-interface/view?" + key, "https://www.bilibili.com/", deadline).then(function (j) {
     var d = j && j.data;
-    if (!d || !d.cid || !d.bvid) return null;
-    return { bvid: d.bvid, cid: Number(d.cid), title: clean(d.title || item.title), duration: Number(d.duration || 0) };
+    if (d && d.cid && d.bvid) {
+      return { bvid: d.bvid, cid: Number(d.cid), title: clean(d.title || item.title), duration: Number(d.duration || 0) };
+    }
+    if (!item.bvid) return null;
+    // Public pagelist endpoint as a non-authenticated fallback when /view is unavailable.
+    return requestJson(API + "/x/player/pagelist?bvid=" + encodeURIComponent(item.bvid) + "&jsonp=jsonp",
+      "https://www.bilibili.com/video/" + item.bvid + "/", deadline).then(function (pageData) {
+      var pages = pageData && pageData.data;
+      if (!Array.isArray(pages) || !pages.length || !pages[0].cid) return null;
+      return {
+        bvid: item.bvid,
+        cid: Number(pages[0].cid),
+        title: clean(item.title),
+        duration: Number(pages[0].duration || 0)
+      };
+    });
   });
 }
 function playUrl(info, deadline) {
