@@ -1,25 +1,21 @@
 # Anichin Providers
 
-Kumpulan provider JavaScript untuk Nuvio. Repository ini berisi provider streaming saja, bukan katalog metadata atau addon Stremio.
+JavaScript providers for Nuvio. This repository contains streaming providers only, not a metadata catalog or a Stremio addon.
 
 ## Manifest
 
-Tambahkan URL berikut pada menu Plugins Nuvio:
+Add the following URL in the Nuvio Plugins menu:
 
 `https://raw.githubusercontent.com/zeeelanddd-pixel/anichin-care-nuvio/main/manifest.json`
 
-## Provider
+## Providers
 
-- **Anichin** — mencari mirror publik dari halaman Anichin. Implementasi: `providers/anichin-care.js`.
-- **Bilibili** — mencari video publik melalui API web Bilibili dan meminta URL playback yang disediakan API. Implementasi: `providers/bilibili.js`.
-- **Odysee** — me-resolve claim publik yang telah diotorisasi melalui SDK proxy resmi Odysee. Implementasi: `providers/odysee.js`. Integrasi awal dibatasi ke claim yang dikonfigurasi.
+- **Anichin**: Finds publicly accessible mirrors from Anichin pages. Implementation: `providers/anichin-care.js`.
+- **Bilibili**: Searches public videos through the Bilibili web API and requests playback URLs supplied by the API. Implementation: `providers/bilibili.js`.
+- **Odysee**: Resolves authorized public claims through Odysee's official SDK proxy. Implementation: `providers/odysee.js`. Only claims with a verifiable reusable license are returned.
 
-Keduanya terdaftar terpisah di Nuvio. Provider Bilibili tidak memakai cookie login, tidak melewati pembatasan wilayah, paywall, DRM, challenge, atau kontrol akses. Provider Odysee hanya mengembalikan URL streaming yang diberikan API publik untuk claim yang dikonfigurasi, tanpa membuat URL CDN sendiri atau mencari unggahan lain. Hanya URL playback langsung yang diberikan oleh API publik dan kompatibel dengan pemutar yang akan dikembalikan. Konten yang memerlukan login atau tidak diizinkan untuk playback publik dapat menghasilkan daftar kosong.
+All providers are registered separately in Nuvio. The Bilibili provider does not use login cookies or bypass regional restrictions, paywalls, DRM, challenges, or access controls. The Odysee provider only returns playback URLs supplied by the public API for claims with an explicitly verifiable reusable license. Content that requires login or is not authorized for public playback may return no streams.
 
-## Kontrak
+Each provider exports `getStreams(tmdbId, mediaType, season, episode)` and returns an array of stream objects containing `name`, `title`, `url`, `quality`, and playback headers when required.
 
-Setiap provider mengekspor `getStreams(tmdbId, mediaType, season, episode)` dan mengembalikan array stream dengan `name`, `title`, `url`, `quality`, dan header playback bila diperlukan.
-
-## Pengujian
-
-GitHub Actions memeriksa sintaks JavaScript, kontrak ekspor, dan validitas JSON manifest. Uji playback nyata tetap bergantung pada ketersediaan konten publik, wilayah, API Bilibili, dan runtime Nuvio.
+GitHub Actions checks JavaScript syntax, export contracts, and manifest JSON validity. Actual playback testing still depends on public content availability, regional availability, the provider APIs, and the Nuvio runtime.
