@@ -40,7 +40,7 @@ function requestJson(url, method, body, deadline) {
   }).catch(function(e){log("request error: "+(e&&e.message||e));return null;});
 }
 function tmdbTitle(id,type,deadline) {
-  if(!TMDB_KEY) { log("TMDB_API_KEY tidak tersedia"); return Promise.resolve(null); }
+  if(!TMDB_KEY) { log("TMDB_API_KEY is not available"); return Promise.resolve(null); }
   var kind=type==="movie"?"movie":"tv";
   var url="https://api.themoviedb.org/3/"+kind+"/"+encodeURIComponent(id)+"?language=en-US&api_key="+encodeURIComponent(TMDB_KEY);
   return requestJson(url,"GET",null,deadline).then(function(j){
@@ -56,8 +56,8 @@ function licensed(meta) {
 function searchClaims(query,deadline) {
   var url=SEARCH_API+"?s="+encodeURIComponent(query)+"&size=48&from=0&claimType=file&mediaType=video&nsfw=false&free_only=true";
   return requestJson(url,"GET",null,deadline).then(function(rows){
-    if(!Array.isArray(rows)) { log("format hasil Lighthouse tidak sesuai"); return []; }
-    log("Lighthouse \"" + query + "\" menghasilkan " + rows.length + " kandidat");
+    if(!Array.isArray(rows)) { log("Unexpected Lighthouse response format"); return []; }
+    log("Lighthouse \"" + query + "\" returned " + rows.length + " candidates");
     return rows.filter(function(x){return x && x.name && x.claimId;});
   });
 }
@@ -68,8 +68,8 @@ function resolveClaim(item,deadline) {
   },deadline).then(function(j){
     var claim=j&&(j.result||j.data||j);
     if(Array.isArray(claim)) claim=claim[0];
-    if(!claim) { log("claim tidak berhasil di-resolve: " + item.name); return null; }
-    if(!licensed(claim)) { log("claim dilewati: lisensi penggunaan ulang tidak terverifikasi"); return null; }
+    if(!claim) { log("Failed to resolve claim: " + item.name); return null; }
+    if(!licensed(claim)) { log("Claim skipped: reusable license could not be verified"); return null; }
     var value=claim.value || {};
     var source=value.source || {};
     var stream=claim.streaming_url || claim.streamingUrl || "";
@@ -90,8 +90,8 @@ function getStreams(tmdbId,mediaType,season,episode) {
   var ep=Math.max(1,Number(episode)||1), deadline=Date.now()+TIMEOUT_MS;
   log("start type="+type+" tmdb="+tmdbId+" episode="+ep);
   return tmdbTitle(tmdbId,type,deadline).then(function(meta){
-    if(!meta) { log("metadata TMDB tidak tersedia; periksa TMDB_API_KEY dan ID katalog"); return []; }
-    log("judul TMDB: " + meta.title + " / " + meta.original);
+    if(!meta) { log("TMDB metadata is unavailable; check TMDB_API_KEY and the catalog ID"); return []; }
+    log("TMDB title: " + meta.title + " / " + meta.original);
     var queries=type==="tv"?[
       meta.title+" episode "+ep,meta.title+" ep "+ep,meta.title+" "+ep,
       meta.original+" episode "+ep,meta.title,meta.original
@@ -106,8 +106,8 @@ function getStreams(tmdbId,mediaType,season,episode) {
         var n=clean(x.name+" "+(x.title||""));
         return titleScore(meta.title,n)>=0.25 || titleScore(meta.original,n)>=0.25;
       }).slice(0,MAX_RESULTS*3);
-      log("kandidat cocok setelah pencocokan judul: "+candidates.length);
-      if(!candidates.length) { log("tidak ada kandidat judul yang cocok; tidak ada permintaan resolusi claim"); return []; }
+      log("candidates cocok setelah pencocokan judul: "+candidates.length);
+      if(!candidates.length) { log("tidak ada candidates judul yang cocok; tidak ada permintaan resolusi claim"); return []; }
       return Promise.all(candidates.map(function(x){return resolveClaim(x,deadline);})).then(function(resolved){
         var out=[];
         resolved.forEach(function(x){
@@ -115,7 +115,7 @@ function getStreams(tmdbId,mediaType,season,episode) {
           out.push({name:PROVIDER,title:x.title+" • "+x.license,url:x.url,quality:"Auto",
             headers:{"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}});
         });
-        log("stream berlisensi ditemukan: "+out.length);
+        log("Licensed streams found: "+out.length);
         return out;
       });
     });
