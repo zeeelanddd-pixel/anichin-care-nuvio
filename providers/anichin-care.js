@@ -3,7 +3,7 @@
  * Hanya memakai halaman dan URL media yang dapat diakses secara publik.
  * Tidak mencoba melewati challenge, login, token, atau pembatasan akses.
  */
-var VERSION = "1.2.3";
+var VERSION = "1.2.4";
 var PROVIDER = "Anichin";
 var BASE = "https://anichin.moe";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -294,13 +294,15 @@ function getStreams(tmdbId, mediaType, season, episode) {
                 var item = resolved[a][b];
                 if (!item.url) continue;
                 // Buang query token sementara agar URL media yang sama tidak muncul berkali-kali.
-                var canonical = String(item.url).split("?")[0].split("#")[0];
+                // URL media bertanda tangan dapat memakai path sama dengan token berbeda.
+                // Pertahankan varian query agar URL valid tidak terbuang.
+                var canonical = String(item.url).split("#")[0];
                 var host = hostOf(item.url);
                 var hostEnd = canonical.indexOf("://");
                 var pathAndHost = hostEnd >= 0 ? canonical.substring(hostEnd + 3) : canonical;
                 var pathStart = pathAndHost.indexOf("/");
                 var path = pathStart >= 0 ? pathAndHost.substring(pathStart).toLowerCase() : "/";
-                var dedupeKey = host + path;
+                var dedupeKey = host + path + "?" + (canonical.indexOf("?") >= 0 ? canonical.substring(canonical.indexOf("?") + 1) : "");
                 if (seen[dedupeKey]) continue;
                 seen[dedupeKey] = true;
                 var label = stripTags(item.label || "").replace(/[ \t\r\n]+/g, " ").trim();
