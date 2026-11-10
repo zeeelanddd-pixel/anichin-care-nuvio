@@ -3,7 +3,7 @@
  * Searches Odysee's documented Lighthouse API and resolves only claims
  * carrying an explicit reusable license (CC0, Public Domain, CC BY / BY-SA).
  */
-var VERSION = "1.1.2";
+var VERSION = "1.1.3"; // Diperbarui dari 1.1.2
 var PROVIDER = "Odysee";
 var SEARCH_API = "https://lighthouse.odysee.tv/search";
 var SDK_API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
@@ -66,22 +66,35 @@ function resolveClaim(item,deadline) {
   return requestJson(SDK_API,"POST",{
     jsonrpc:"2.0",id:1,method:"get",params:{uri:uri}
   },deadline).then(function(j){
-    var claim=j&&(j.result||j.data||j);
-    if(Array.isArray(claim)) claim=claim[0];
-    if(!claim) { log("Failed to resolve claim: " + item.name); return null; }
-    if(!licensed(claim)) { log("Claim skipped: reusable license could not be verified"); return null; }
-    var value=claim.value || {};
-    var source=value.source || {};
-    var stream=claim.streaming_url || claim.streamingUrl || "";
-    if(!stream && claim.name && claim.claim_id) {
-      stream=PLAYER+"/api/v3/streams/free/"+encodeURIComponent(claim.name)+"/"+encodeURIComponent(claim.claim_id);
-      if(source.sd_hash && source.media_type) {
-        var ext=String(source.media_type).split("/").pop().replace(/[^a-z0-9]/gi,"");
-        stream+="/"+String(source.sd_hash).slice(0,6)+(ext?"."+ext:"");
-      }
+    var result=j&&(j.result||j.data||j);
+    if(Array.isArray(result)) result=result[0];
+    if(!result) { log("Failed to resolve claim: " + item.name); return null; }
+    
+    // PERBAIKAN 1: Ekstrak objek 'claim' yang bersarang agar filter lisensi berfungsi
+    var innerClaim = result.claim || result; 
+    
+    if(!licensed(innerClaim)) { log("Claim skipped: reusable license could not be verified"); return null; }
+    
+    var value = innerClaim.value || {};
+    var stream = result.streaming_url || result.streamingUrl || "";
+    
+    // Perbaikan fallback stream: menggunakan format master.m3u8 untuk kompatibilitas pemutar HLS Nuvio
+    if(!stream && innerClaim.name && innerClaim.claim_id) {
+      stream = PLAYER + "/api/v4/streams/free/" + encodeURIComponent(innerClaim.name) + "/" + encodeURIComponent(innerClaim.claim_id) + "/master.m3u8";
     }
+    
     if(!/^https:\/\//i.test(stream)) return null;
-    return {url:stream,title:clean(claim.value && claim.value.title || item.name),license:String(value.license || (value.metadata&&value.metadata.license) || "")};
+    
+    // PERBAIKAN 2: Tangkap resolusi dari metadata sumber
+    var height = value.video && value.video.height;
+    var qualityStr = height ? height + "p" : "Auto";
+    
+    return {
+      url: stream,
+      title: clean(value.title || innerClaim.name),
+      license: String(value.license || (value.metadata && value.metadata.license) || ""),
+      quality: qualityStr // Kualitas dinamis
+    };
   });
 }
 function getStreams(tmdbId,mediaType,season,episode) {
@@ -114,8 +127,13 @@ function getStreams(tmdbId,mediaType,season,episode) {
         var out=[];
         resolved.forEach(function(x){
           if(!x || out.length>=MAX_RESULTS) return;
-          out.push({name:PROVIDER,title:x.title+" • "+x.license,url:x.url,quality:"Auto",
-            headers:{"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}});
+          out.push({
+            name: PROVIDER,
+            title: x.title + " • " + x.license,
+            url: x.url,
+            quality: x.quality, // Meneruskan kualitas dinamis
+            headers: {"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}
+          });
         });
         log("Verified reusable-license streams found: "+out.length);
         return out;
@@ -124,3 +142,4 @@ function getStreams(tmdbId,mediaType,season,episode) {
   }).catch(function(e){log("getStreams error: "+(e&&e.message||e));return [];});
 }
 module.exports={getStreams:getStreams};
+    
