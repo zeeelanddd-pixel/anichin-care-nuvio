@@ -1,9 +1,9 @@
 /*
- * Odysee Public - Nuvio provider
+ * Odysee Public - Nuvio Provider
  * Searches Odysee's documented Lighthouse API and resolves only claims
  * carrying an explicit reusable license (CC0, Public Domain, CC BY / BY-SA).
  */
-var VERSION = "1.1.3"; // Diperbarui dari 1.1.2
+var VERSION = "1.1.3";
 var PROVIDER = "Odysee";
 var SEARCH_API = "https://lighthouse.odysee.tv/search";
 var SDK_API = "https://api.na-backend.odysee.com/api/v1/proxy?m=get";
@@ -70,22 +70,20 @@ function resolveClaim(item,deadline) {
     if(Array.isArray(result)) result=result[0];
     if(!result) { log("Failed to resolve claim: " + item.name); return null; }
     
-    // PERBAIKAN 1: Ekstrak objek 'claim' yang bersarang agar filter lisensi berfungsi
-    var innerClaim = result.claim || result; 
-    
+    // Extract nested inner claim object for proper license verification
+    var innerClaim = result.claim || result;
     if(!licensed(innerClaim)) { log("Claim skipped: reusable license could not be verified"); return null; }
     
     var value = innerClaim.value || {};
     var stream = result.streaming_url || result.streamingUrl || "";
     
-    // Perbaikan fallback stream: menggunakan format master.m3u8 untuk kompatibilitas pemutar HLS Nuvio
     if(!stream && innerClaim.name && innerClaim.claim_id) {
       stream = PLAYER + "/api/v4/streams/free/" + encodeURIComponent(innerClaim.name) + "/" + encodeURIComponent(innerClaim.claim_id) + "/master.m3u8";
     }
     
     if(!/^https:\/\//i.test(stream)) return null;
     
-    // PERBAIKAN 2: Tangkap resolusi dari metadata sumber
+    // Extract video resolution metadata dynamically
     var height = value.video && value.video.height;
     var qualityStr = height ? height + "p" : "Auto";
     
@@ -93,7 +91,7 @@ function resolveClaim(item,deadline) {
       url: stream,
       title: clean(value.title || innerClaim.name),
       license: String(value.license || (value.metadata && value.metadata.license) || ""),
-      quality: qualityStr // Kualitas dinamis
+      quality: qualityStr
     };
   });
 }
@@ -131,7 +129,7 @@ function getStreams(tmdbId,mediaType,season,episode) {
             name: PROVIDER,
             title: x.title + " • " + x.license,
             url: x.url,
-            quality: x.quality, // Meneruskan kualitas dinamis
+            quality: x.quality,
             headers: {"Referer":"https://odysee.com/","Origin":"https://odysee.com","User-Agent":UA,"Accept":"*/*"}
           });
         });
