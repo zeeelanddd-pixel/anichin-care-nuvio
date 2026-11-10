@@ -1,69 +1,24 @@
 {
-  "name": "Anichin Providers",
+  "manifest_version": "1.4.2",
+  "id": "anichin-care",
+  "name": "Anichin Care",
   "version": "1.4.2",
-  "description": "Multi-source donghua and animation streaming providers for Nuvio",
-  "author": "zeeelanddd-pixel",
-  "scrapers": [
+  "description": "Nuvio video provider plugin combining Anichin, Bilibili, and Odysee with verified license support.",
+  "providers": [
     {
-      "id": "anichin-care",
+      "id": "anichin",
       "name": "Anichin",
-      "description": "Movie and series provider using publicly accessible Anichin pages",
-      "version": "1.2.8",
-      "author": "zeeelanddd-pixel",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "providers/anichin-care.js",
-      "enabled": true,
-      "formats": [
-        "m3u8",
-        "mp4"
-      ],
-      "contentLanguage": [
-        "id"
-      ]
+      "version": "1.2.8"
     },
     {
-      "id": "bilibili-public",
+      "id": "bilibili",
       "name": "Bilibili",
-      "description": "Public Bilibili video provider using the official web API",
-      "version": "1.0.4",
-      "author": "zeeelanddd-pixel",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "providers/bilibili.js",
-      "enabled": true,
-      "formats": [
-        "mp4"
-      ],
-      "contentLanguage": [
-        "id",
-        "en",
-        "zh"
-      ]
+      "version": "1.0.4"
     },
     {
-      "id": "odysee-public",
+      "id": "odysee",
       "name": "Odysee",
-      "description": "Odysee provider for public claims with a verifiable reusable license",
-      "version": "1.1.2",
-      "author": "zeeelanddd-pixel",
-      "supportedTypes": [
-        "tv"
-      ],
-      "filename": "providers/odysee.js",
-      "enabled": true,
-      "formats": [
-        "mp4",
-        "m3u8"
-      ],
-      "contentLanguage": [
-        "en",
-        "fr"
-      ]
+      "version": "1.1.3"
     }
   ]
 }
