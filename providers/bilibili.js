@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.0.4";
+var VERSION = "1.0.5";
 var PROVIDER = "Bilibili";
 var API = "https://api.bilibili.com";
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -34,7 +34,7 @@ function score(a, b) {
   for (var j = 0; j < aa.length; j++) if (aa[j] && set[aa[j]]) hit++;
   return aa.length && bb.length ? 2 * hit / (aa.length + bb.length) : 0;
 }
-function requestJson(url, referer, deadline) {
+function requestJson(url, referer, deadline, extraHeaders) {
   if (Date.now() > deadline) return Promise.resolve(null);
   var headers = {
     "User-Agent": UA,
@@ -42,6 +42,9 @@ function requestJson(url, referer, deadline) {
     "Referer": referer || "https://www.bilibili.com/",
     "Origin": "https://www.bilibili.com"
   };
+  if (extraHeaders) {
+    for (var k in extraHeaders) if (Object.prototype.hasOwnProperty.call(extraHeaders, k)) headers[k] = extraHeaders[k];
+  }
   return fetch(url, { method: "GET", headers: headers, redirect: "follow" }).then(function (r) {
     if (!r || !r.ok) {
       log("HTTP request failed: " + (r ? r.status : "no response"));
@@ -71,10 +74,13 @@ function tmdbTitle(id, type, deadline) {
     return Promise.resolve(null);
   }
   var kind = type === "movie" ? "movie" : "tv";
-  var url = "https://api.themoviedb.org/3/" + kind + "/" + encodeURIComponent(id) +
-    "?language=en-US&api_key=" + encodeURIComponent(TMDB_KEY);
-  return requestJson(url, "https://www.themoviedb.org/", deadline).then(function (j) {
-    var d = j && (j.data || j);
+  var cleanId = String(id == null ? "" : id).replace(/^tmdb:/i, "").trim();
+  if (!/^\d+$/.test(cleanId)) { log("Unsupported TMDB id: " + id); return Promise.resolve(null); }
+  var url = "https://api.themoviedb.org/3/" + kind + "/" + cleanId + "?language=en-US", headers = {};
+  // v4 read-access tokens are JWTs and go in a header; v3 keys go in the query string.
+  if (/^eyJ/.test(TMDB_KEY) || TMDB_KEY.length > 40) headers.Authorization = "Bearer " + TMDB_KEY;
+  else url += "&api_key=" + encodeURIComponent(TMDB_KEY);
+  return requestJson(url, "https://www.themoviedb.org/", deadline, headers).then(function (d) {
     var title = d && (d.name || d.title || d.original_name || d.original_title);
     if (!title) return null;
     return { title: String(title), originalTitle: String(d.original_name || d.original_title || title) };
@@ -97,7 +103,7 @@ function searchVideos(title, episode, type, deadline) {
     var out = [], seen = {};
     var ep = String(Math.max(1, Number(episode) || 1));
     var epPattern = new RegExp(
-      "(?:第\\s*0*" + ep + "\\s*[集话話]|(?:episode|ep|e)\\s*0*" + ep + "\\b|(?:^|[\\s#_-])0*" + ep + "(?:集|话|話|期)?(?:$|[\\s#_.-]))",
+      "(?:第\\s*0*" + ep + "\\s*[集话話]|\\b(?:episode|ep|e)\\s*0*" + ep + "\\b|(?:^|[\\s#_-])0*" + ep + "(?:集|话|話|期)?(?:$|[\\s#_.-]))",
       "i"
     );
     for (var g = 0; g < groups.length; g++) {
@@ -107,7 +113,7 @@ function searchVideos(title, episode, type, deadline) {
         var bvid = String(x.bvid || "");
         var aid = Number(x.aid || 0);
         if (!name || (!bvid && !aid)) continue;
-        var titleScore = Math.max(score(title, name), score(title, name.replace(/(?:episode|ep|第)?\\\\s*0*\\\\d+\\\\s*(?:集|话|話)?/ig, " ")));
+        var titleScore = Math.max(score(title, name), score(title, name.replace(/(?:\b(?:episode|ep)|第)?\s*0*\d+\s*(?:集|话|話|期)?/ig, " ")));
         var epMatch = type !== "tv" || epPattern.test(name);
         if (titleScore < 0.38 || !epMatch) continue;
         var key = bvid || String(aid);
@@ -164,7 +170,8 @@ function playUrl(info, deadline) {
       }
     }
     var quality = d && d.quality ? String(d.quality) : "";
-    var label = quality === "80" ? "1080p" : quality === "64" ? "720p" : quality === "32" ? "480p" : "Auto";
+    var QUALITY_LABELS = { "120": "4K", "116": "1080p60", "112": "1080p+", "80": "1080p", "74": "720p60", "64": "720p", "32": "480p", "16": "360p" };
+    var label = QUALITY_LABELS[quality] || "Auto";
     return urls.slice(0, MAX_RESULTS).map(function (u, i) {
       return {
         name: PROVIDER,
