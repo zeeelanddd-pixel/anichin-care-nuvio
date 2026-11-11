@@ -1,4 +1,4 @@
-name: Validate provider
+name: Validate providers
 
 on:
   push:
@@ -15,8 +15,8 @@ jobs:
         with:
           node-version: 20
       - name: Check JavaScript syntax
-        run: node --check providers/anichin-care.js && node --check providers/bilibili.js
-      - name: Check provider contract
-        run: node tests/provider-contract.test.js
+        run: npm run check
       - name: Validate manifest JSON
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('Manifest JSON OK')"
+      - name: Contract and behaviour tests
+        run: npm test
