@@ -4,19 +4,14 @@
  */
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { load, at, V3, mirrorPage, okPage, rumbleApi, dmMeta } = require("./helpers");
+const { load, at, V3, mirrorPage, okPage, rumbleApi, dmMeta, epItem, epList } = require("./helpers");
 
 const AX = "https://animexin.dev";
 const DK = "https://donghuaking.in";
 
-const tmdbTv = (id, body) => at("https://api.themoviedb.org/3/tv/" + id + "?language=en-US&api_key=" + V3, body);
-const tmdbMovie = (id, body) => at("https://api.themoviedb.org/3/movie/" + id + "?language=en-US&api_key=" + V3, body);
+const tmdbTv = (id, body) => at("https://api.themoviedb.org/3/tv/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3, body);
+const tmdbMovie = (id, body) => at("https://api.themoviedb.org/3/movie/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3, body);
 const wp = (base, term, items) => at(base + "/wp-json/wp/v2/search?search=" + encodeURIComponent(term), items);
-// One row of the theme's episode list.
-const epItem = (base, show, n, slug, suffix) =>
-  '<li><a href="' + base + "/" + slug + '/"><div class="epl-num">' + n + '</div><div class="epl-title">' + show + " Episode " + n + (suffix || "") +
-  '</div><div class="epl-sub"><span class="status Sub">Sub</span></div><div class="epl-date">November 1, 2026</div></a></li>';
-const epList = (items) => '<div class="eplister"><ul>' + items.join("") + "</ul></div>";
 
 /* ===================== Animexin ===================== */
 test("animexin: right series, an episode whose slug lacks 'episode', and language labels kept", async () => {

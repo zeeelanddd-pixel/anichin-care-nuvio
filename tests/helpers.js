@@ -72,4 +72,10 @@ const dmMeta = (tag) => ({ qualities: {
   "720": [{ type: "video/mp4", url: "https://cdn.dmcdn.net/" + tag + "/720.mp4?x=1" }]
 } });
 
-module.exports = { load, at, b64, V3, iframeOption, mirrorPage, htmlAttr, okHtml, okPage, okMeta, rumbleApi, dmMeta };
+// One row / the list of the theme's episode list (series page and episode-page sidebar).
+const epItem = (base, show, n, slug, suffix) =>
+  '<li><a href="' + base + "/" + slug + '/"><div class="epl-num">' + n + '</div><div class="epl-title">' + show + " Episode " + n + (suffix || "") +
+  '</div><div class="epl-sub"><span class="status Sub">Sub</span></div><div class="epl-date">November 1, 2026</div></a></li>';
+const epList = (items) => '<div class="eplister"><ul>' + items.join("") + "</ul></div>";
+
+module.exports = { epItem, epList, load, at, b64, V3, iframeOption, mirrorPage, htmlAttr, okHtml, okPage, okMeta, rumbleApi, dmMeta };

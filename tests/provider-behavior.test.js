@@ -26,7 +26,7 @@ const okMeta = {
 
 function anichinRoutes(extra) {
   return [
-    at("https://api.themoviedb.org/3/tv/1234?language=en-US&api_key=" + V3, { name: "Fake Show", original_name: "假节目" }),
+    at("https://api.themoviedb.org/3/tv/1234?language=en-US&append_to_response=alternative_titles&api_key=" + V3, { name: "Fake Show", original_name: "假节目" }),
     at(BASE + "/wp-json/wp/v2/search?search=Fake%20Show", [
       { title: "Fake Show", url: BASE + "/seri/fake-show/" },
       { title: "Fake Show Season 2", url: BASE + "/seri/fake-show-season-2/" }
@@ -110,7 +110,7 @@ test("anichin: season/episode of null or -1 (movies) are normalised", async () =
 
 test("anichin: movie reads mirrors from the film page", async () => {
   const routes = [
-    at("https://api.themoviedb.org/3/movie/55?language=en-US&api_key=" + V3, { title: "Fake Movie" }),
+    at("https://api.themoviedb.org/3/movie/55?language=en-US&append_to_response=alternative_titles&api_key=" + V3, { title: "Fake Movie" }),
     at(BASE + "/wp-json/wp/v2/search?search=Fake%20Movie", [{ title: "Fake Movie Subtitle Indonesia", url: BASE + "/fake-movie/" }]),
     at(BASE + "/fake-movie/", mirrorPage([["MP4", "https://cdn.example.net/movie.mp4"]]))
   ];
@@ -131,7 +131,7 @@ test("anichin: falls back to the TMDB web page when no API key is available", as
 test("anichin: TMDB v4 token is sent as a Bearer header, not in the URL", async () => {
   const token = "eyJhbGciOiJIUzI1NiJ9." + "x".repeat(60);
   const routes = anichinRoutes([(u, o) =>
-    u === "https://api.themoviedb.org/3/tv/1234?language=en-US" && o.headers.Authorization === "Bearer " + token &&
+    u === "https://api.themoviedb.org/3/tv/1234?language=en-US&append_to_response=alternative_titles" && o.headers.Authorization === "Bearer " + token &&
     { body: JSON.stringify({ name: "Fake Show" }) }
   ]);
   const { provider, calls } = load("anichin-care.js", routes, token);
@@ -142,7 +142,7 @@ test("anichin: TMDB v4 token is sent as a Bearer header, not in the URL", async 
 
 test("anichin: tries the original title when the English title finds nothing", async () => {
   const routes = [
-    at("https://api.themoviedb.org/3/tv/9?language=en-US&api_key=" + V3, { name: "Totally Other Name", original_name: "Fake Show" }),
+    at("https://api.themoviedb.org/3/tv/9?language=en-US&append_to_response=alternative_titles&api_key=" + V3, { name: "Totally Other Name", original_name: "Fake Show" }),
     at(BASE + "/wp-json/wp/v2/search?search=Totally%20Other%20Name", []),
     at(BASE + "/?s=Totally%20Other%20Name", "<html><body>nothing</body></html>"),
     at(BASE + "/wp-json/wp/v2/search?search=Fake%20Show", [{ title: "Fake Show", url: BASE + "/seri/fake-show/" }]),
@@ -157,7 +157,7 @@ test("anichin: tries the original title when the English title finds nothing", a
 test("anichin: OK.ru metadataUrl indirection and relative links", async () => {
   const metaUrl = "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=111";
   const routes = [
-    at("https://api.themoviedb.org/3/tv/7?language=en-US&api_key=" + V3, { name: "Fake Show" }),
+    at("https://api.themoviedb.org/3/tv/7?language=en-US&append_to_response=alternative_titles&api_key=" + V3, { name: "Fake Show" }),
     at(BASE + "/wp-json/wp/v2/search?search=Fake%20Show", [{ title: "Fake Show", url: BASE + "/seri/fake-show/" }]),
     // root-relative episode link
     at(BASE + "/seri/fake-show/", '<a class="eplister" href="/fake-show-episode-4/">Episode 4</a>'),
