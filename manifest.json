@@ -1,14 +1,14 @@
 {
   "name": "Anichin Providers",
-  "version": "1.4.0",
-  "description": "Nuvio streaming providers: Anichin, Animexin, DonghuaKing, Bilibili, and Odysee.",
+  "version": "1.5.0",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaKing (Bilibili and Odysee included but disabled).",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin",
       "name": "Anichin",
       "description": "Anichin provider for publicly accessible video pages.",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
@@ -32,7 +32,7 @@
       "id": "animexin",
       "name": "Animexin",
       "description": "Animexin provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
-      "version": "1.0.0",
+      "version": "1.5.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
@@ -57,7 +57,7 @@
       "id": "donghuaking",
       "name": "DonghuaKing",
       "description": "DonghuaKing provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
-      "version": "1.0.0",
+      "version": "1.5.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
@@ -81,7 +81,7 @@
     {
       "id": "bilibili",
       "name": "Bilibili",
-      "description": "Public Bilibili video provider using the official web API.",
+      "description": "Disabled by default: Bilibili blocks anonymous API requests (HTTP 412) and rarely carries Indonesian subtitles. Public Bilibili API provider.",
       "version": "1.0.5",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
@@ -105,14 +105,14 @@
     {
       "id": "odysee",
       "name": "Odysee",
-      "description": "Odysee provider for public claims with a verifiable reusable license.",
+      "description": "Disabled by default: only returns claims with a verifiable reusable license (CC0, Public Domain, CC BY / BY-SA), which donghua almost never have.",
       "version": "1.1.4",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "tv"
       ],
       "filename": "providers/odysee.js",
-      "enabled": true,
+      "enabled": false,
       "logo": "",
       "contentLanguage": [
         "en"

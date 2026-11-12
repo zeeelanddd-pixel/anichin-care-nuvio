@@ -1,15 +1,16 @@
 {
   "name": "anichin-care-nuvio",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
-  "description": "Nuvio streaming providers: Anichin, Animexin, DonghuaKing, Bilibili, and Odysee.",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaKing (Bilibili and Odysee included but disabled).",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check providers/anichin-care.js && node --check providers/animexin.js && node --check providers/donghuaking.js && node --check providers/bilibili.js && node --check providers/odysee.js",
+    "check": "node --check providers/anichin-care.js && node --check providers/animexin.js && node --check providers/donghuaking.js && node --check providers/bilibili.js && node --check providers/odysee.js && node --check tools/sync-engine.js && node --check tools/diagnose.js",
     "sync": "node tools/sync-engine.js",
-    "test": "node tests/provider-contract.test.js && node tests/provider-behavior.test.js && node tests/themesia-sites.test.js"
+    "diagnose": "node tools/diagnose.js",
+    "test": "node tests/provider-contract.test.js && node tests/provider-behavior.test.js && node tests/themesia-sites.test.js && node tests/field-reports.test.js"
   }
 }

@@ -2,6 +2,29 @@
 
 Nomor versi di judul mengikuti provider Anichin (`manifest.json` → `anichin`). Perubahan Bilibili dan Odysee dicatat di entri yang sama.
 
+## 1.5.0
+
+Berdasarkan hasil uji lapangan (Renegade Immortal dan Beyond Time’s Gaze): Anichin jalan di keduanya, Animexin hanya di Renegade Immortal, provider lain tidak menghasilkan stream.
+
+### Mesin bersama (Anichin, Animexin, DonghuaKing)
+- **Apostrof:** Animexin menulis "Beyond Time’s Gaze" dengan apostrof melengkung, sedangkan TMDB memakai apostrof lurus; pencarian WordPress menganggapnya kata berbeda sehingga hasilnya kosong. Kueri kini dibersihkan dari tanda baca (apostrof menjadi spasi, sisa satu huruf dibuang). Judul panjang juga dicoba dengan tiga kata pertama.
+- **Nomor episode lanjutan:** situs menomori episode terus-menerus (Beyond Time’s Gaze sampai 47), sedangkan TMDB per musim. Pada halaman tanpa penanda "Season N", S2E3 setelah S1 berisi 26 episode kini dicari sebagai episode 29. Bila episode itu belum ada, hasilnya kosong, bukan episode musim 1 yang salah. Halaman yang bernomor per musim tetap memakai nomor di dalam musim.
+- **Judul alias:** nama alternatif TMDB (mis. "Guang Yin Zhi Wai") dicoba bila judul utama tidak ditemukan; hanya yang beraksara Latin.
+- **Satu halaman per serial:** hasil pencarian yang berisi banyak postingan episode serial yang sama tidak lagi diunduh semuanya; halaman serial diutamakan (daftar episodenya lengkap). Batas kandidat 8 menjadi 5.
+- **DonghuaKing:** pemutar bawaan halaman (Dailymotion) kini selalu dibaca, bukan hanya bila dropdown kosong, dan halaman pemutar milik situs sendiri yang dipilih di dropdown ikut dicoba.
+- **Dailymotion:** bila permintaan polos ditolak (ID privat "k…"), diulang dengan bentuk permintaan pemutar web dailymotion.com; embedder-nya halaman tonton Dailymotion sendiri, bukan situs pihak ketiga.
+- Log lebih rinci (kandidat, jumlah episode yang terdaftar, nomor yang dicari) untuk memudahkan pelacakan.
+
+### Provider
+- **Animexin, DonghuaKing, Anichin** naik ke 1.5.0 (ketiganya berbagi nomor versi).
+- **Bilibili dan Odysee dinonaktifkan bawaan.** Bilibili: API anonim dijawab HTTP 412 dan jarang memuat subtitle Indonesia; melewatinya butuh cookie atau tanda tangan permintaan yang tidak dilakukan proyek ini. Odysee: sengaja hanya mengembalikan klaim berlisensi bebas pakai, yang hampir tidak pernah dipakai donghua. Kode keduanya tidak diubah.
+- DonghuaKing hanya bisa menayangkan yang ada di situsnya. Halaman Renegade Immortal di sana berhenti di episode 121 (Desember 2025) dan baru mulai dari episode 69.
+
+### Repo
+- `tools/diagnose.js` (`npm run diagnose`) menjalankan provider ke jaringan sungguhan dan mencetak tiap langkah.
+- `tests/field-reports.test.js`: skenario dari laporan di atas, dengan tiruan pencarian WordPress yang meniru perilaku aslinya (semua kata harus cocok sebagai substring).
+- README ditulis ulang dengan tabel status provider dan panduan "tidak ada stream".
+
 ## 1.4.0
 
 ### Provider baru
