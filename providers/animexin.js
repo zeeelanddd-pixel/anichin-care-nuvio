@@ -8,7 +8,7 @@
  * donghuaking.js (all three sites use the same WordPress theme). Edit it in
  * anichin-care.js, then run `node tools/sync-engine.js`; the contract test fails if they differ.
  */
-var VERSION = "1.0.0";
+var VERSION = "1.5.0";
 var PROVIDER = "Animexin";
 var LOG_NAME = "AnimexinCare";
 var BASE = "https://animexin.dev";
@@ -182,9 +182,27 @@ function tmdbApi(path, deadline) {
   else url += (path.indexOf("?") >= 0 ? "&" : "?") + "api_key=" + encodeURIComponent(TMDB_KEY);
   return fetchText(url, "https://www.themoviedb.org/", deadline, headers);
 }
-function tmdbMeta(name, original) {
-  var titles = unique([name ? String(name) : "", original && norm(original) ? String(original) : ""]);
-  return titles.length ? { title: titles[0], titles: titles } : null;
+function tmdbMeta(name, original, alts, counts) {
+  // Titles to search with, best first. Latin-script aliases only: the sites are searched with ASCII text.
+  var seen = {}, titles = [];
+  [name, original].concat(alts || []).forEach(function (t) {
+    t = t ? String(t) : "";
+    var k = norm(t);
+    if (!k || seen[k]) return;
+    if (titles.length && /[^\u0000-\u024F\u2018-\u201D]/.test(t)) return;
+    seen[k] = true; titles.push(t);
+  });
+  return titles.length ? { title: titles[0], titles: titles.slice(0, 8), counts: counts || null } : null;
+}
+// Episodes in every season before `season`; sites often number episodes continuously across seasons.
+function seasonOffset(counts, season) {
+  if (!counts || season <= 1) return 0;
+  var sum = 0;
+  for (var n = 1; n < season; n++) {
+    if (typeof counts[n] !== "number" || !(counts[n] > 0)) return 0;
+    sum += counts[n];
+  }
+  return sum;
 }
 function tmdbWebTitle(id, kind, deadline) {
   return fetchText("https://www.themoviedb.org/" + kind + "/" + encodeURIComponent(id) + "?language=en-US", null, deadline).then(function (r) {
@@ -192,7 +210,7 @@ function tmdbWebTitle(id, kind, deadline) {
     var m = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i.exec(r.text) ||
             /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i.exec(r.text);
     var t = m ? decodeHtml(m[1]).replace(/\s*\((?:19|20)\d{2}\)\s*$/, "").trim() : "";
-    return t ? tmdbMeta(t, "") : null;
+    return t ? tmdbMeta(t, "", [], null) : null;
   });
 }
 function tmdbTitle(id, type, deadline) {
@@ -201,11 +219,19 @@ function tmdbTitle(id, type, deadline) {
   if (!/^\d+$/.test(cleanId)) { log("Unsupported TMDB id: " + id); return Promise.resolve(null); }
   var viaApi = Promise.resolve(null);
   if (TMDB_KEY) {
-    viaApi = tmdbApi(kind + "/" + cleanId + "?language=en-US", deadline).then(function (r) {
+    viaApi = tmdbApi(kind + "/" + cleanId + "?language=en-US&append_to_response=alternative_titles", deadline).then(function (r) {
       if (!r) return null;
       try {
-        var j = JSON.parse(r.text);
-        return tmdbMeta(j.name || j.title || j.original_name || j.original_title, j.original_name || j.original_title);
+        var j = JSON.parse(r.text), alts = [], counts = null;
+        var rows = j.alternative_titles && (j.alternative_titles.results || j.alternative_titles.titles);
+        if (Array.isArray(rows)) rows.forEach(function (x) { if (x && x.title) alts.push(String(x.title)); });
+        if (Array.isArray(j.seasons)) {
+          counts = {};
+          j.seasons.forEach(function (sn) {
+            if (sn && sn.season_number >= 1 && sn.episode_count >= 0) counts[sn.season_number] = Number(sn.episode_count);
+          });
+        }
+        return tmdbMeta(j.name || j.title || j.original_name || j.original_title, j.original_name || j.original_title, alts, counts);
       } catch (e) { return null; }
     });
   } else {
@@ -215,6 +241,17 @@ function tmdbTitle(id, type, deadline) {
 }
 
 /* ---------- Search ---------- */
+// The sites use a plain WordPress search: "Time's" (ASCII apostrophe) does not match "Time’s" (curly),
+// so punctuation becomes spaces and one-letter leftovers ("s") are dropped.
+function queryVariants(title) {
+  var base = String(title || "").replace(/\s+/g, " ").trim();
+  var words = base.replace(/['’‘`´]/g, " ").replace(/[:;,.!?()\[\]{}"“”<>|\/\\*+=_~^&-]+/g, " ")
+    .split(/\s+/).filter(function (w) { return w && (w.length > 1 || /\d/.test(w)); });
+  var out = [words.join(" ")];
+  if (words.length > 4) out.push(words.slice(0, 3).join(" "));
+  out.push(base);
+  return unique(out);
+}
 function wpSearch(title, deadline) {
   var url = BASE + "/wp-json/wp/v2/search?search=" + encodeURIComponent(title) + "&per_page=30";
   return fetchText(url, BASE + "/", deadline).then(function (r) {
@@ -248,6 +285,7 @@ function htmlSearch(title, deadline) {
     return out;
   });
 }
+function isEpisodeTitle(t) { return /\bepisode\s*\d/i.test(String(t || "")); }
 function rankCandidates(items, title, season) {
   var ranked = [];
   for (var i = 0; i < items.length; i++) {
@@ -263,15 +301,32 @@ function rankCandidates(items, title, season) {
     if (score >= 0.48) ranked.push({ url: items[i].url, title: items[i].title, score: score, tier: tier });
   }
   ranked.sort(function (a, b) { return b.tier - a.tier || b.score - a.score; });
-  return ranked.slice(0, 8);
+  // Search often returns many episode posts of one series; one page per series is enough
+  // (prefer the series page, whose episode list is complete).
+  var out = [], at = {};
+  for (var j = 0; j < ranked.length; j++) {
+    var key = scoreNorm(ranked[j].title);
+    if (at[key] === undefined) { at[key] = out.length; out.push(ranked[j]); }
+    else if (isEpisodeTitle(out[at[key]].title) && !isEpisodeTitle(ranked[j].title)) out[at[key]] = ranked[j];
+  }
+  return out.slice(0, 5);
 }
 function searchTitle(title, season, deadline) {
-  return wpSearch(title, deadline).then(function (items) {
-    var ranked = rankCandidates(items, title, season);
-    if (ranked.length) return ranked;
-    // The REST search can return only unrelated posts; try the site's HTML search too.
-    return htmlSearch(title, deadline).then(function (html) { return rankCandidates(html, title, season); });
-  });
+  var queries = queryVariants(title), i = 0;
+  function next() {
+    if (i >= queries.length) return Promise.resolve([]);
+    var q = queries[i++];
+    return wpSearch(q, deadline).then(function (items) {
+      var ranked = rankCandidates(items, title, season);
+      if (ranked.length) return ranked;
+      // The REST search can return only unrelated posts; try the site's HTML search too.
+      return htmlSearch(q, deadline).then(function (html) {
+        var found = rankCandidates(html, title, season);
+        return found.length ? found : next();
+      });
+    });
+  }
+  return next();
 }
 function findSeries(titles, season, deadline) {
   var i = 0;
@@ -312,6 +367,14 @@ function pickEpisode(eps, e, title) {
   }
   return best;
 }
+// Which episode number to look for on a page. TMDB numbers episodes per season, but a series page that is not
+// marked "Season N" usually numbers them continuously (S2E3 after a 26-episode S1 is "Episode 29").
+function episodeTargets(e, season, offset, tier, eps) {
+  if (season <= 1 || tier >= 2 || !offset) return [e];
+  var max = 0;
+  for (var i = 0; i < eps.length; i++) if (eps[i].num > max) max = eps[i].num;
+  return max > offset ? [offset + e] : [e];
+}
 // Movie pages on this theme can hold only the episode list; the player is on the linked page.
 function firstEpisodeLink(html, pageUrl) {
   var m = /class=["'][^"']*eplister[^"']*["'][^>]*>[\s\S]*?<a\b[^>]*href=["']([^"']+)["']/i.exec(html);
@@ -334,8 +397,8 @@ function decodeBase64(s) {
   return out;
 }
 function parseServerLinks(html, pageUrl) {
-  var out = [], seen = {};
-  function add(raw, label) {
+  var out = [], seen = {}, pageHost = hostOf(pageUrl);
+  function add(raw, label, explicit) {
     var decoded = String(raw || "").trim();
     if (!decoded) return;
     if (decoded.charAt(0) !== "<" && !/^https?:|^\/\//i.test(decoded)) {
@@ -346,8 +409,13 @@ function parseServerLinks(html, pageUrl) {
     var sm = /<(?:source|video)\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(decoded);
     var u = absUrl(im ? im[1] : (sm ? sm[1] : decoded), pageUrl);
     var h = hostOf(u);
-    if (!u || !h || h === hostOf(pageUrl) || seen[u]) return;
-    if (!isKnownHost(h) && !isMedia(u)) return;
+    if (!u || !h || seen[u]) return;
+    if (h === pageHost) {
+      // A site's own player page is a legitimate server when it is an explicit dropdown option.
+      if (!explicit || u.split("#")[0] === String(pageUrl).split("#")[0]) return;
+    } else if (!isKnownHost(h) && !isMedia(u)) {
+      return;
+    }
     seen[u] = true; out.push({ url: u, label: stripTags(label) || sourceName(h) });
   }
   var sel = /<select\b[^>]*(?:class|name|id)=["'][^"']*mirror[^"']*["'][^>]*>([\s\S]*?)<\/select>/gi, sm;
@@ -355,17 +423,16 @@ function parseServerLinks(html, pageUrl) {
     var opt = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi, om;
     while ((om = opt.exec(sm[1]))) {
       var val = /\bvalue=["']([^"']+)["']/i.exec(om[1]);
-      if (val) add(val[1], om[2]);
+      if (val) add(val[1], om[2], true);
     }
   }
   if (!out.length) {
     var data = /\bdata-(?:embed|video|iframe)=["']([^"']+)["']/gi, dm;
-    while ((dm = data.exec(html))) add(dm[1], "Mirror");
+    while ((dm = data.exec(html))) add(dm[1], "Mirror", false);
   }
-  if (!out.length) {
-    var iframe = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi, fm, count = 0;
-    while ((fm = iframe.exec(html)) && count < 8) { add(fm[1], "Mirror"); count++; }
-  }
+  // The page's default player is not always in the dropdown (DonghuaKing), so always read the iframes too.
+  var iframe = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi, fm, count = 0;
+  while ((fm = iframe.exec(html)) && count < 8) { add(fm[1], "Mirror", false); count++; }
   return out;
 }
 
@@ -463,26 +530,32 @@ function resolveDailymotion(server, deadline) {
   var id = dailymotionId(server.url);
   if (!id) return resolveGeneric(server, deadline);
   var api = "https://www.dailymotion.com/player/metadata/video/" + encodeURIComponent(id);
-  return fetchText(api, server.url, deadline).then(function (r) {
+  function parse(r) {
     var out = [];
-    if (r) {
-      try {
-        var j = JSON.parse(r.text);
-        if (j.error) log("Dailymotion: " + stripTags(String(j.error.message || j.error.title || j.error)));
-        var q = j.qualities || {};
-        Object.keys(q).forEach(function (key) {
-          (Array.isArray(q[key]) ? q[key] : []).forEach(function (entry) {
-            var u = absUrl(entry && entry.url, api);
-            if (!u) return;
-            var height = /^\d+$/.test(key) ? Number(key) : 0;
-            out.push({ url: u, quality: height ? height + "p" : "Auto", height: height, referer: "https://www.dailymotion.com/", trusted: true });
-          });
+    if (!r) return out;
+    try {
+      var j = JSON.parse(r.text);
+      if (j.error) log("Dailymotion: " + stripTags(String(j.error.message || j.error.title || j.error)));
+      var q = j.qualities || {};
+      Object.keys(q).forEach(function (key) {
+        (Array.isArray(q[key]) ? q[key] : []).forEach(function (entry) {
+          var u = absUrl(entry && entry.url, api);
+          if (!u) return;
+          var height = /^\d+$/.test(key) ? Number(key) : 0;
+          out.push({ url: u, quality: height ? height + "p" : "Auto", height: height, referer: "https://www.dailymotion.com/", trusted: true });
         });
-        out.sort(function (a, b) { return b.height - a.height; });
-      } catch (e) { log("Dailymotion: metadata is not valid JSON"); }
-    }
-    return out.length ? out : resolveGeneric(server, deadline);
-  });
+      });
+      out.sort(function (a, b) { return b.height - a.height; });
+    } catch (e) { log("Dailymotion: metadata is not valid JSON"); }
+    return out;
+  }
+  return fetchText(api, server.url, deadline).then(parse).then(function (items) {
+    if (items.length) return items;
+    // Some videos (private "k..." ids) answer only to the request shape of the dailymotion.com web player.
+    var watch = "https://www.dailymotion.com/video/" + id;
+    var q = api + "?app=com.dailymotion.neon&embedder=" + encodeURIComponent(watch) + "&integration=inline&GK_PV5_NEON=1";
+    return fetchText(q, watch, deadline).then(parse);
+  }).then(function (items) { return items.length ? items : resolveGeneric(server, deadline); });
 }
 
 function resolveRumble(server, deadline) {
@@ -522,7 +595,7 @@ function resolveServer(server, deadline) {
   var h = hostOf(server.url), items;
   if (isMedia(server.url)) {
     items = Promise.resolve([{ url: server.url, referer: BASE + "/" }]);
-  } else if (!isKnownHost(h)) {
+  } else if (!isKnownHost(h) && h !== hostOf(BASE)) {
     items = Promise.resolve([]);
   } else if (/(?:^|\.)(?:ok\.ru|odnoklassniki\.ru)$/.test(h)) {
     items = resolveOkru(server, deadline);
@@ -595,17 +668,24 @@ function getStreams(tmdbId, mediaType, season, episode) {
   return tmdbTitle(tmdbId, type, deadline).then(function (meta) {
     if (!meta || !meta.title) { log("TMDB title is unavailable"); return []; }
     log("TMDB title: " + meta.titles.join(" / "));
+    var offset = type === "tv" ? seasonOffset(meta.counts, s) : 0;
     return findSeries(meta.titles, s, deadline).then(function (candidates) {
       if (!candidates.length) { log("Title not found in public search results"); return []; }
+      log("Candidates: " + candidates.map(function (c) { return c.title; }).join(" | "));
       var pageTasks = candidates.map(function (candidate) {
         return fetchText(candidate.url, BASE + "/", deadline).then(function (r) {
           if (!r) return null;
           if (type === "movie") return { page: r };
-          var hit = pickEpisode(parseEpisodes(r.text, r.url), e, candidate.title);
-          if (hit) return sameUrl(hit.url, r.url) ? { page: r } : { pageUrl: hit.url };
+          var eps = parseEpisodes(r.text, r.url);
+          var targets = episodeTargets(e, s, offset, candidate.tier, eps);
+          log("\"" + candidate.title + "\": " + eps.length + " episodes listed, looking for " + targets.join("/"));
+          for (var j = 0; j < targets.length; j++) {
+            var hit = pickEpisode(eps, targets[j], candidate.title);
+            if (hit) return sameUrl(hit.url, r.url) ? { page: r } : { pageUrl: hit.url };
+          }
           // The search may have returned the episode post itself rather than the series page.
           var own = /\bepisode\s*0*(\d+(?:\.\d+)?)/i.exec(candidate.title);
-          if (own && Number(own[1]) === e) return { page: r };
+          if (own && targets.indexOf(Number(own[1])) >= 0) return { page: r };
           return null;
         });
       });
