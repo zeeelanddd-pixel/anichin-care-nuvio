@@ -2,21 +2,31 @@
  * Anichin Care - Nuvio provider
  * Uses only publicly accessible pages and media URLs.
  * Does not bypass challenges, login requirements, tokens, or access restrictions.
+ *
+ * Site-specific settings are the four variables below. Everything between the
+ * SHARED ENGINE markers is identical in anichin-care.js, animexin.js and
+ * donghuaking.js (all three sites use the same WordPress theme). Edit it in this
+ * file, then run `node tools/sync-engine.js`; the contract test fails if they differ.
  */
-var VERSION = "1.3.0";
+var VERSION = "1.4.0";
 var PROVIDER = "Anichin";
+var LOG_NAME = "AnichinCare";
 var BASE = "https://anichin.moe";
+
+/* ==== SHARED ENGINE START ==== */
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
-var MAX_RESULTS = 12;
+var MAX_RESULTS = 16;
 var REQUEST_BUDGET_MS = 45000;
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TMDB_API_KEY) : "";
 
 // Hosts whose embed pages this provider knows how to read (subdomains included).
 var KNOWN_HOSTS = /(?:^|\.)(?:ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net|dai\.ly|d\.tube|dtube\.video|odysee\.com|odysee\.tv|lbry\.tv)$/;
 var OKRU_QUALITY = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
+// Words that describe the release rather than the series; ignored when comparing titles.
+var NOISE_WORDS = /\b(?:episode|eps?)\s*\d+(?:\.\d+)?(?:\s+\d+)?\b|\b(?:sub|subs|subtitle|subtitles|indo|indonesia|indonesian|english|eng|hardsub|softsub|dub|dubbed)\b/g;
 
 function log(msg) {
-  try { console.log("[AnichinCare v" + VERSION + "] " + String(msg)); } catch (e) {}
+  try { console.log("[" + LOG_NAME + " v" + VERSION + "] " + String(msg)); } catch (e) {}
 }
 function decodeHtml(s) {
   // &amp; is decoded last so "&amp;quot;" becomes "&quot;" and not a quote.
@@ -50,6 +60,10 @@ function hostOf(u) {
   var m = /^https?:\/\/([^/:?#]+)/i.exec(String(u || ""));
   return m ? m[1].toLowerCase().replace(/^www\./, "") : "";
 }
+function sameUrl(a, b) {
+  function clean(u) { return String(u || "").split("#")[0].replace(/\/+$/, "").toLowerCase(); }
+  return clean(a) === clean(b);
+}
 function isKnownHost(h) { return KNOWN_HOSTS.test(h || ""); }
 function isMedia(u) { return /\.(?:m3u8|mp4)(?:$|[?#])/i.test(String(u || "")); }
 function sourceName(h) {
@@ -59,6 +73,7 @@ function sourceName(h) {
   if (/(?:^|\.)(?:odysee\.com|odysee\.tv|odycdn\.com|lbry\.tv)$/.test(h)) return "Odysee";
   return h || PROVIDER;
 }
+function compact(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); }
 function unique(items) {
   var seen = {}, out = [];
   for (var i = 0; i < items.length; i++) {
@@ -66,17 +81,62 @@ function unique(items) {
   }
   return out;
 }
+
+/* ---------- Title matching ---------- */
 function norm(s) {
   return stripTags(s).toLowerCase().replace(/&/g, " and ")
     .replace(/\b(donghua|sub indo|subtitle indonesia)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
+function scoreNorm(s) {
+  return norm(s).replace(NOISE_WORDS, " ").replace(/\bend\s*$/, " ").replace(/\s+/g, " ").trim();
+}
+function tokensOf(s) { return unique(scoreNorm(s).split(" ")); }
+// True when two strings differ by at most one substitution, insertion, deletion or adjacent swap.
+function withinOneEdit(a, b) {
+  if (a === b) return true;
+  var la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  var i = 0;
+  while (i < la && i < lb && a.charAt(i) === b.charAt(i)) i++;
+  if (la === lb) {
+    if (a.substring(i + 1) === b.substring(i + 1)) return true;
+    return a.charAt(i) === b.charAt(i + 1) && a.charAt(i + 1) === b.charAt(i) && a.substring(i + 2) === b.substring(i + 2);
+  }
+  return la > lb ? a.substring(i + 1) === b.substring(i) : b.substring(i + 1) === a.substring(i);
+}
+// Sites misspell titles ("Deamon Hunter", "Steller"); tolerate one typo in words of 5+ letters.
+function sameToken(a, b) { return a === b || (a.length >= 5 && b.length >= 5 && withinOneEdit(a, b)); }
+function scoreTokens(aa, bb) {
+  if (!aa.length || !bb.length) return 0;
+  var used = {}, hit = 0, i, j;
+  for (i = 0; i < aa.length; i++) {
+    for (j = 0; j < bb.length; j++) {
+      if (!used[j] && sameToken(aa[i], bb[j])) { used[j] = true; hit++; break; }
+    }
+  }
+  return (2 * hit) / (aa.length + bb.length);
+}
+// "Gu An [One Slash to the Heavens]" is also known as "Gu An" and as "One Slash to the Heavens".
+function titleVariants(s) {
+  s = String(s || "");
+  var out = [s], inner = [], m, re = /[\[(]([^\]\[()]+)[\])]/g;
+  while ((m = re.exec(s))) { if (tokensOf(m[1]).length >= 2) inner.push(m[1]); }
+  if (inner.length) {
+    out.push(s.replace(/[\[(][^\]\[()]*[\])]/g, " "));
+    for (var i = 0; i < inner.length; i++) out.push(inner[i]);
+  }
+  return out;
+}
 function titleScore(a, b) {
-  var aa = unique(norm(a).split(" ")), bb = unique(norm(b).split(" "));
-  var set = {}, hit = 0, i;
-  for (i = 0; i < bb.length; i++) set[bb[i]] = true;
-  for (i = 0; i < aa.length; i++) if (set[aa[i]]) hit++;
-  return aa.length && bb.length ? (2 * hit) / (aa.length + bb.length) : 0;
+  var av = titleVariants(a), bv = titleVariants(b), best = 0;
+  for (var i = 0; i < av.length; i++) {
+    for (var j = 0; j < bv.length; j++) {
+      var sc = scoreTokens(tokensOf(av[i]), tokensOf(bv[j]));
+      if (sc > best) best = sc;
+    }
+  }
+  return best;
 }
 function seasonMarker(normalized) {
   var m = /\bseason (\d+)\b/.exec(normalized) || /\bs(\d{1,2})\b/.exec(normalized) ||
@@ -84,6 +144,7 @@ function seasonMarker(normalized) {
   return m ? Number(m[1]) : 0;
 }
 
+/* ---------- HTTP ---------- */
 function fetchText(url, referer, deadline, extraHeaders) {
   if (Date.now() > deadline) return Promise.resolve(null);
   var headers = { "User-Agent": UA, "Accept": "text/html,application/json;q=0.9,*/*;q=0.8", "Accept-Language": "id-ID,id;q=0.9,en;q=0.7" };
@@ -240,6 +301,22 @@ function parseEpisodes(html, pageUrl) {
   }
   return out;
 }
+function slugText(u) { return String(u || "").replace(/^https?:\/\/[^/]+/i, "").replace(/[-_/.]+/g, " "); }
+// Episode pages also link to other series' episodes (widgets); among equal numbers prefer the right series.
+function pickEpisode(eps, e, title) {
+  var best = null, bestScore = -1;
+  for (var i = 0; i < eps.length; i++) {
+    if (eps[i].num !== e) continue;
+    var sc = title ? titleScore(eps[i].label + " " + slugText(eps[i].url), title) : 0;
+    if (sc > bestScore) { best = eps[i]; bestScore = sc; }
+  }
+  return best;
+}
+// Movie pages on this theme can hold only the episode list; the player is on the linked page.
+function firstEpisodeLink(html, pageUrl) {
+  var m = /class=["'][^"']*eplister[^"']*["'][^>]*>[\s\S]*?<a\b[^>]*href=["']([^"']+)["']/i.exec(html);
+  return m ? absUrl(m[1], pageUrl) : "";
+}
 function decodeBase64(s) {
   var clean = String(s || "").replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
   try {
@@ -293,6 +370,7 @@ function parseServerLinks(html, pageUrl) {
 }
 
 /* ---------- Resolvers ---------- */
+// Items: { url, quality ("720p" | "Auto"), height, referer, trusted }. resolveServer adds serverLabel + source.
 // Generic scan: media URLs published as plain text in HTML or JSON.
 function directMediaUrls(text, pageUrl) {
   var src = String(text || "").replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/&amp;/g, "&");
@@ -305,15 +383,13 @@ function directMediaUrls(text, pageUrl) {
   }
   return found;
 }
-function genericItems(text, pageUrl, server) {
-  return directMediaUrls(text, pageUrl).map(function (u) {
-    return { url: u, label: server.label, referer: pageUrl };
-  });
+function genericItems(text, pageUrl) {
+  return directMediaUrls(text, pageUrl).map(function (u) { return { url: u, referer: pageUrl }; });
 }
 function resolveGeneric(server, deadline) {
   return fetchText(server.url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
-    var items = genericItems(r.text, r.url, server);
+    var items = genericItems(r.text, r.url);
     if (!items.length) log("No public media URL found in the " + hostOf(server.url) + " embed page");
     return items;
   });
@@ -333,14 +409,14 @@ function okruInfo(html) {
   if (fv.metadataUrl) { try { metaUrl = decodeURIComponent(String(fv.metadataUrl)); } catch (e3) { metaUrl = String(fv.metadataUrl); } }
   return { metadata: md && typeof md === "object" ? md : null, metadataUrl: metaUrl };
 }
-function okruItems(md, referer, server) {
+function okruItems(md, referer) {
   var out = [], seen = {};
   function push(u, height) {
     u = absUrl(u, referer);
     if (!u || seen[u]) return;
     seen[u] = true;
     // OK.ru MP4 URLs carry no file extension, so they are flagged as trusted media.
-    out.push({ url: u, label: height ? height + "p" : server.label, quality: height ? height + "p" : "Auto", height: height || 0, referer: referer, trusted: true });
+    out.push({ url: u, quality: height ? height + "p" : "Auto", height: height || 0, referer: referer, trusted: true });
   }
   var videos = Array.isArray(md.videos) ? md.videos : [];
   for (var i = 0; i < videos.length; i++) {
@@ -359,13 +435,13 @@ function resolveOkru(server, deadline) {
     var info = okruInfo(r.text);
     if (!info) {
       log("OK.ru: no data-options with flashvars (video removed or page changed)");
-      return genericItems(r.text, r.url, server);
+      return genericItems(r.text, r.url);
     }
     function fromMetadata(md) {
       if (!md) return [];
       if (md.error) log("OK.ru: " + stripTags(String(md.error)));
-      var items = okruItems(md, r.url, server);
-      return items.length ? items : genericItems(JSON.stringify(md), r.url, server);
+      var items = okruItems(md, r.url);
+      return items.length ? items : genericItems(JSON.stringify(md), r.url);
     }
     if (info.metadata) return fromMetadata(info.metadata);
     if (info.metadataUrl) {
@@ -399,7 +475,7 @@ function resolveDailymotion(server, deadline) {
             var u = absUrl(entry && entry.url, api);
             if (!u) return;
             var height = /^\d+$/.test(key) ? Number(key) : 0;
-            out.push({ url: u, label: height ? height + "p" : server.label, quality: height ? height + "p" : "Auto", height: height, referer: "https://www.dailymotion.com/", trusted: true });
+            out.push({ url: u, quality: height ? height + "p" : "Auto", height: height, referer: "https://www.dailymotion.com/", trusted: true });
           });
         });
         out.sort(function (a, b) { return b.height - a.height; });
@@ -428,7 +504,7 @@ function resolveRumble(server, deadline) {
           var meta = item.meta || {};
           var height = Number(meta.h || meta.height || key || 0);
           var quality = height > 0 ? height + "p" : (/^\d+$/.test(key) ? key + "p" : "Auto");
-          out.push({ url: u, label: quality, quality: quality, height: height, referer: server.url, trusted: true });
+          out.push({ url: u, quality: quality, height: height, referer: server.url, trusted: true });
         });
       }
       out.sort(function (a, b) { return (b.height || 0) - (a.height || 0); });
@@ -439,13 +515,13 @@ function resolveRumble(server, deadline) {
     } catch (e) {
       log("Unable to read Rumble quality metadata");
     }
-    return genericItems(r.text, r.url, server).map(function (it) { it.referer = server.url; return it; });
+    return genericItems(r.text, r.url).map(function (it) { it.referer = server.url; return it; });
   });
 }
 function resolveServer(server, deadline) {
   var h = hostOf(server.url), items;
   if (isMedia(server.url)) {
-    items = Promise.resolve([{ url: server.url, label: server.label, referer: BASE + "/" }]);
+    items = Promise.resolve([{ url: server.url, referer: BASE + "/" }]);
   } else if (!isKnownHost(h)) {
     items = Promise.resolve([]);
   } else if (/(?:^|\.)(?:ok\.ru|odnoklassniki\.ru)$/.test(h)) {
@@ -459,14 +535,18 @@ function resolveServer(server, deadline) {
   }
   var source = sourceName(h);
   return items.then(function (list) {
-    for (var i = 0; i < list.length; i++) list[i].source = source;
+    for (var i = 0; i < list.length; i++) { list[i].source = source; list[i].serverLabel = server.label; }
     return list;
   });
 }
 
 /* ---------- Stream assembly ---------- */
+function resolutionOf(s) {
+  var m = /(?:^|[^0-9])(2160|1440|1080|720|480|360|240|144)p(?:[^0-9]|$)/i.exec(String(s || ""));
+  return m ? m[1] : "";
+}
 function buildStreams(resolved, pageUrl) {
-  var streams = [], seen = {};
+  var rows = [], seen = {};
   for (var a = 0; a < resolved.length; a++) {
     for (var b = 0; b < resolved[a].length; b++) {
       var item = resolved[a][b];
@@ -477,29 +557,32 @@ function buildStreams(resolved, pageUrl) {
       seen[key] = true;
       // Expose direct media only, not watch/embed pages (trusted = extensionless media API URLs).
       if (!item.trusted && !isMedia(item.url)) continue;
-      var host = hostOf(item.url);
-      var source = item.source || sourceName(host);
-      var label = stripTags(item.label || "").replace(/[ \t\r\n]+/g, " ").trim();
-      if (!label || /^(server|mirror|auto)$/i.test(label)) label = source;
-      var res = /(?:^|[^0-9])(2160|1440|1080|720|480|360|240|144)p(?:[^0-9]|$)/i.exec(label + " " + (item.quality || "") + " " + item.url);
-      var quality = res ? res[1] + "p" : (item.quality || label);
+      var source = item.source || sourceName(hostOf(item.url));
+      // The site's own option text ("Hardsub Indonesia Ok.ru AX") carries the subtitle language; keep it.
+      var serverLabel = stripTags(item.serverLabel || "");
+      if (/^(server|mirror|auto)$/i.test(serverLabel)) serverLabel = "";
+      var res = resolutionOf(item.quality) || resolutionOf(item.url) || resolutionOf(serverLabel);
+      var quality = res ? res + "p" : (item.quality || serverLabel || source);
       var parts = [];
-      // Skip the label only when it is a bare resolution that the title shows anyway ("720p • OK.ru • 720p").
-      var labelIsResolution = res && label.toLowerCase() === res[1] + "p";
-      if (label !== source && !labelIsResolution) parts.push(label);
-      parts.push(source);
-      if (res) parts.push(res[1] + "p");
-      streams.push({
-        name: source,
-        title: parts.join(" • "),
-        url: item.url,
-        quality: quality,
-        headers: { "Referer": item.referer || pageUrl, "User-Agent": UA }
+      if (serverLabel) parts.push(serverLabel);
+      if (!serverLabel || compact(serverLabel).indexOf(compact(source)) < 0) parts.push(source);
+      if (res && compact(serverLabel).indexOf(res + "p") < 0) parts.push(res + "p");
+      rows.push({
+        order: rows.length,
+        indo: /\bindo(?:nesia)?\b/i.test(serverLabel),
+        stream: {
+          name: source,
+          title: parts.join(" • "),
+          url: item.url,
+          quality: quality,
+          headers: { "Referer": item.referer || pageUrl, "User-Agent": UA }
+        }
       });
-      if (streams.length >= MAX_RESULTS) return streams;
     }
   }
-  return streams;
+  // Indonesian-subtitle options first, otherwise keep the site's order; then cap the list.
+  rows.sort(function (x, y) { return (y.indo ? 1 : 0) - (x.indo ? 1 : 0) || x.order - y.order; });
+  return rows.slice(0, MAX_RESULTS).map(function (row) { return row.stream; });
 }
 
 function getStreams(tmdbId, mediaType, season, episode) {
@@ -518,10 +601,11 @@ function getStreams(tmdbId, mediaType, season, episode) {
         return fetchText(candidate.url, BASE + "/", deadline).then(function (r) {
           if (!r) return null;
           if (type === "movie") return { page: r };
-          var eps = parseEpisodes(r.text, r.url);
-          for (var j = 0; j < eps.length; j++) {
-            if (eps[j].num === e) return { pageUrl: eps[j].url };
-          }
+          var hit = pickEpisode(parseEpisodes(r.text, r.url), e, candidate.title);
+          if (hit) return sameUrl(hit.url, r.url) ? { page: r } : { pageUrl: hit.url };
+          // The search may have returned the episode post itself rather than the series page.
+          var own = /\bepisode\s*0*(\d+(?:\.\d+)?)/i.exec(candidate.title);
+          if (own && Number(own[1]) === e) return { page: r };
           return null;
         });
       });
@@ -531,17 +615,25 @@ function getStreams(tmdbId, mediaType, season, episode) {
         if (!chosen) { log("No matching page or episode was found"); return []; }
         var pagePromise = chosen.page ? Promise.resolve(chosen.page) : fetchText(chosen.pageUrl, BASE + "/", deadline);
         return pagePromise.then(function (page) {
-          if (!page) return [];
+          if (!page) return null;
           var servers = parseServerLinks(page.text, page.url);
-          log("Mirrors found: " + servers.length);
-          if (!servers.length) return [];
-          return Promise.all(servers.map(function (server) {
+          if (servers.length || type !== "movie") return { page: page, servers: servers };
+          var next = firstEpisodeLink(page.text, page.url);
+          if (!next || sameUrl(next, page.url)) return { page: page, servers: servers };
+          return fetchText(next, BASE + "/", deadline).then(function (watch) {
+            return watch ? { page: watch, servers: parseServerLinks(watch.text, watch.url) } : { page: page, servers: [] };
+          });
+        }).then(function (found) {
+          if (!found) return [];
+          log("Mirrors found: " + found.servers.length);
+          if (!found.servers.length) return [];
+          return Promise.all(found.servers.map(function (server) {
             return Promise.resolve().then(function () { return resolveServer(server, deadline); }).catch(function (err) {
               log("Resolver error for " + hostOf(server.url) + ": " + (err && err.message ? err.message : err));
               return [];
             });
           })).then(function (resolved) {
-            var streams = buildStreams(resolved, page.url);
+            var streams = buildStreams(resolved, found.page.url);
             log("Direct streams found: " + streams.length);
             return streams;
           });
@@ -554,3 +646,4 @@ function getStreams(tmdbId, mediaType, season, episode) {
   });
 }
 module.exports = { getStreams: getStreams };
+/* ==== SHARED ENGINE END ==== */
