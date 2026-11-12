@@ -2,6 +2,21 @@
 
 Nomor versi di judul mengikuti provider Anichin (`manifest.json` → `anichin`). Perubahan Bilibili dan Odysee dicatat di entri yang sama.
 
+## 1.4.0
+
+### Provider baru
+- **Animexin** (1.0.0) dan **DonghuaKing** (1.0.0): kedua situs memakai tema WordPress yang sama dengan Anichin, jadi ketiganya berbagi satu mesin. Blok mesin harus identik di `anichin-care.js`, `animexin.js`, dan `donghuaking.js`; ubah di `anichin-care.js` lalu jalankan `npm run sync` (test kontrak gagal bila berbeda).
+- Server yang didukung: OK.ru, Rumble, Dailymotion, dan mirror `.m3u8`/`.mp4` langsung. Mega, Streamwish, dan Dood dilewati tanpa request (butuh token/skrip yang tidak diakali). Embed Dtube dan Odysee dicoba, tetapi halamannya tidak memuat URL media sehingga biasanya tidak menghasilkan stream.
+
+### Anichin (1.4.0) dan mesin bersama
+- **Judul:** nama alternatif dalam kurung ("Gu An [One Slash to the Heavens]" cocok dengan "Gu An"), toleransi satu salah ketik pada kata 5+ huruf ("Deamon", "Steller"), dan kata rilis (episode, sub, indo, english, END) diabaikan saat membandingkan judul.
+- **Episode:** bila beberapa tautan memiliki nomor yang sama (widget serial lain), dipilih yang judulnya paling mirip. Slug tanpa kata "episode" (`renegade-61-indonesia-english`) dikenali dari label. Bila pencarian hanya mengembalikan halaman episode, daftar episode di halaman itu dipakai.
+- **Film:** bila halaman film hanya memuat daftar episode, tautan pertamanya diikuti untuk menemukan pemutar.
+- **Stream:** teks opsi server dari situs ("Hardsub Indonesia Ok.ru AX") dipertahankan di judul supaya bahasa subtitle terlihat; opsi Indonesia ditampilkan lebih dulu; batas hasil naik dari 12 ke 16.
+
+### Repo
+- `tests/helpers.js` (tiruan jaringan bersama), `tests/themesia-sites.test.js` (data berbentuk situs asli), `tools/sync-engine.js`.
+
 ## 1.3.0
 
 ### Anichin

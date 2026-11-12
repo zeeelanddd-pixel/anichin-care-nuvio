@@ -1,21 +1,79 @@
 {
   "name": "Anichin Providers",
-  "version": "1.3.0",
-  "description": "Nuvio streaming providers: Anichin, Bilibili, and Odysee.",
+  "version": "1.4.0",
+  "description": "Nuvio streaming providers: Anichin, Animexin, DonghuaKing, Bilibili, and Odysee.",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin",
       "name": "Anichin",
       "description": "Anichin provider for publicly accessible video pages.",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "author": "zeeelanddd-pixel",
-      "supportedTypes": ["movie", "tv"],
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
       "filename": "providers/anichin-care.js",
       "enabled": true,
       "logo": "",
-      "contentLanguage": ["id"],
-      "formats": ["mp4", "m3u8"],
+      "contentLanguage": [
+        "id"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true
+    },
+    {
+      "id": "animexin",
+      "name": "Animexin",
+      "description": "Animexin provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
+      "version": "1.0.0",
+      "author": "zeeelanddd-pixel",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/animexin.js",
+      "enabled": true,
+      "logo": "",
+      "contentLanguage": [
+        "id",
+        "en"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true
+    },
+    {
+      "id": "donghuaking",
+      "name": "DonghuaKing",
+      "description": "DonghuaKing provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
+      "version": "1.0.0",
+      "author": "zeeelanddd-pixel",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/donghuaking.js",
+      "enabled": true,
+      "logo": "",
+      "contentLanguage": [
+        "id",
+        "en"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
       "limited": false,
       "disabledPlatforms": [],
       "supportsExternalPlayer": true
@@ -26,12 +84,20 @@
       "description": "Public Bilibili video provider using the official web API.",
       "version": "1.0.5",
       "author": "zeeelanddd-pixel",
-      "supportedTypes": ["movie", "tv"],
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
       "filename": "providers/bilibili.js",
       "enabled": false,
       "logo": "",
-      "contentLanguage": ["zh"],
-      "formats": ["mp4", "m3u8"],
+      "contentLanguage": [
+        "zh"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
       "limited": false,
       "disabledPlatforms": [],
       "supportsExternalPlayer": true
@@ -42,12 +108,19 @@
       "description": "Odysee provider for public claims with a verifiable reusable license.",
       "version": "1.1.4",
       "author": "zeeelanddd-pixel",
-      "supportedTypes": ["tv"],
+      "supportedTypes": [
+        "tv"
+      ],
       "filename": "providers/odysee.js",
       "enabled": true,
       "logo": "",
-      "contentLanguage": ["en"],
-      "formats": ["mp4", "m3u8"],
+      "contentLanguage": [
+        "en"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
       "limited": false,
       "disabledPlatforms": [],
       "supportsExternalPlayer": true
