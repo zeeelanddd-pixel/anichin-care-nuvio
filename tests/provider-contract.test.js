@@ -55,3 +55,18 @@ test("CHANGELOG documents the current Anichin version", () => {
   assert.ok(changelog.includes("## " + anichin.version), "CHANGELOG.md has no '## " + anichin.version + "' section");
   assert.ok(!/^-\s*$/m.test(changelog), "CHANGELOG.md contains an empty bullet");
 });
+
+test("anichin-care, animexin and donghuaking share an identical engine (after editing it, run: node tools/sync-engine.js)", () => {
+  const START = "/* ==== SHARED ENGINE START ==== */";
+  const END = "/* ==== SHARED ENGINE END ==== */";
+  const engine = (name) => {
+    const text = fs.readFileSync(path.join(root, "providers", name), "utf8");
+    const a = text.indexOf(START), b = text.indexOf(END);
+    assert.ok(a >= 0 && b > a, name + " has no SHARED ENGINE markers");
+    return text.slice(a, b + END.length);
+  };
+  const reference = engine("anichin-care.js");
+  for (const name of ["animexin.js", "donghuaking.js"]) {
+    assert.equal(engine(name), reference, name + " engine differs from anichin-care.js");
+  }
+});

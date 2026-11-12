@@ -4,55 +4,12 @@
  */
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const path = require("node:path");
 
-const PROVIDERS = path.join(__dirname, "..", "providers");
-const realLog = console.log;
-console.log = function () {
-  if (/^\[(AnichinCare|BilibiliPublic|OdyseePublic)/.test(String(arguments[0] || ""))) {
-    if (process.env.VERBOSE) realLog.apply(console, arguments);
-    return;
-  }
-  realLog.apply(console, arguments);
-};
-
-function makeResponse(spec, url) {
-  const status = spec.status || 200;
-  return {
-    status: status,
-    ok: status >= 200 && status < 300,
-    url: spec.url || url,
-    text: function () { return Promise.resolve(spec.body == null ? "" : String(spec.body)); }
-  };
-}
-// routes: functions (url, opts) => { body, status? } | falsy
-function load(file, routes, key) {
-  const calls = [];
-  global.fetch = function (url, opts) {
-    url = String(url);
-    calls.push({ url: url, opts: opts || {} });
-    for (let i = 0; i < routes.length; i++) {
-      const hit = routes[i](url, opts || {});
-      if (hit) return Promise.resolve(makeResponse(hit, url));
-    }
-    return Promise.reject(new Error("no mock route for " + url));
-  };
-  if (key === undefined) delete global.TMDB_API_KEY; else global.TMDB_API_KEY = key;
-  const full = path.join(PROVIDERS, file);
-  delete require.cache[require.resolve(full)];
-  return { provider: require(full), calls: calls };
-}
-const at = (prefix, body) => (u) => u.startsWith(prefix) && { body: typeof body === "string" ? body : JSON.stringify(body) };
-const b64 = (s) => Buffer.from(s).toString("base64");
+const { load, at, b64, V3, mirrorPage, okHtml, okPage, rumbleApi, dmMeta } = require("./helpers");
 
 /* ===================== Anichin ===================== */
 const BASE = "https://anichin.moe";
-const V3 = "0123456789abcdef0123456789abcdef";
 
-const iframeOption = (label, src) => '<option value="' + b64('<iframe src="' + src + '" allowfullscreen></iframe>') + '">' + label + "</option>";
-const mirrorPage = (options) =>
-  '<html><body><select class="mirror" name="mirror"><option value="">Pilih Server Video</option>' +
-  options.map((o) => iframeOption(o[0], o[1])).join("") + "</select></body></html>";
 const seriesPage = (slug, nums) =>
   '<div class="eplister"><ul>' + nums.map((n) =>
     '<li><a href="' + BASE + "/" + slug + "-episode-" + n + '-subtitle-indonesia/"><div class="epl-num">' + n +
@@ -66,20 +23,6 @@ const okMeta = {
   ],
   hlsManifestUrl: "https://vd1.okcdn.ru/video.m3u8?id=1&sig=a"
 };
-// Reproduces the real OK.ru shape: JSON inside JSON inside an HTML attribute, with \u0026 for "&".
-const htmlAttr = (o) => JSON.stringify(o).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-const okHtml = (flashvars) =>
-  '<div data-options="{&quot;decoy&quot;:1}"></div><div data-module="OKVideo" data-options="' + htmlAttr({ flashvars: flashvars }) + '"></div>';
-const okPage = okHtml({ metadata: JSON.stringify(okMeta).replace(/&/g, "\\u0026") });
-
-const rumbleApi = { ua: { mp4: {
-  "360": { url: "https://sp.rmbl.ws/s8/2/a/b/c/360.mp4", meta: { h: 360, w: 640 } },
-  "720": { url: "https://sp.rmbl.ws/s8/2/a/b/c/720.mp4", meta: { h: 720, w: 1280 } }
-} } };
-const dmMeta = { qualities: {
-  auto: [{ type: "application/x-mpegURL", url: "https://www.dailymotion.com/cdn/manifest/video/x8abcd.m3u8?auth=1" }],
-  "720": [{ type: "video/mp4", url: "https://cdn.dmcdn.net/x/720.mp4?x=1" }]
-} };
 
 function anichinRoutes(extra) {
   return [
@@ -99,9 +42,9 @@ function anichinRoutes(extra) {
     ])),
     at(BASE + "/fake-show-episode-3-subtitle-indonesia/", mirrorPage([["Server S1", "https://cdn.example.net/s1e3.m3u8"]])),
     at(BASE + "/fake-show-season-2-episode-3-subtitle-indonesia/", mirrorPage([["Server S2", "https://cdn.example.net/s2e3.m3u8"]])),
-    at("https://ok.ru/videoembed/111", okPage),
-    at("https://rumble.com/embedJS/u3/?request=video&ver=2&v=v5abc", rumbleApi),
-    at("https://www.dailymotion.com/player/metadata/video/x8abcd", dmMeta)
+    at("https://ok.ru/videoembed/111", okPage("a")),
+    at("https://rumble.com/embedJS/u3/?request=video&ver=2&v=v5abc", rumbleApi("a/b/c")),
+    at("https://www.dailymotion.com/player/metadata/video/x8abcd", dmMeta("x8abcd"))
   ].concat(extra || []);
 }
 
@@ -128,7 +71,7 @@ test("anichin: resolves OK.ru, Rumble, Dailymotion and direct mirrors; skips uns
   assert.ok(auto, "Dailymotion HLS missing");
   assert.equal(auto.quality, "Auto");
   assert.equal(auto.name, "Dailymotion");
-  assert.equal(byUrl("https://cdn.dmcdn.net/x/720.mp4?x=1").quality, "720p");
+  assert.equal(byUrl("https://cdn.dmcdn.net/x8abcd/720.mp4?x=1").quality, "720p");
 
   const direct = byUrl("https://cdn.example.net/v/ep2.m3u8");
   assert.ok(direct, "direct m3u8 mirror missing");
