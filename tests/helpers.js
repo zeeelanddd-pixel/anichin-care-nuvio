@@ -78,4 +78,12 @@ const epItem = (base, show, n, slug, suffix) =>
   '</div><div class="epl-sub"><span class="status Sub">Sub</span></div><div class="epl-date">November 1, 2026</div></a></li>';
 const epList = (items) => '<div class="eplister"><ul>' + items.join("") + "</ul></div>";
 
-module.exports = { epItem, epList, load, at, b64, V3, iframeOption, mirrorPage, htmlAttr, okHtml, okPage, okMeta, rumbleApi, dmMeta };
+// WordPress REST search: terms are ANDed and matched as substrings, so "Time's" (ASCII) never matches "Time’s" (curly).
+const wpAnd = (base, posts) => (u) => {
+  const prefix = base + "/wp-json/wp/v2/search?search=";
+  if (!u.startsWith(prefix)) return null;
+  const terms = decodeURIComponent(u.slice(prefix.length).split("&")[0]).toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+  return { body: JSON.stringify(posts.filter((p) => terms.every((t) => p.title.toLowerCase().includes(t)))) };
+};
+
+module.exports = { wpAnd, epItem, epList, load, at, b64, V3, iframeOption, mirrorPage, htmlAttr, okHtml, okPage, okMeta, rumbleApi, dmMeta };

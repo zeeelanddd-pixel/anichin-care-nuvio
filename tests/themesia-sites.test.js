@@ -4,7 +4,7 @@
  */
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { load, at, V3, mirrorPage, okPage, rumbleApi, dmMeta, epItem, epList } = require("./helpers");
+const { load, at, V3, mirrorPage, okPage, rumbleApi, dmMeta, epItem, epList, wpAnd } = require("./helpers");
 
 const AX = "https://animexin.dev";
 const DK = "https://donghuaking.in";
@@ -207,4 +207,58 @@ test("donghuaking: no results and dead network give [] without throwing", async 
   assert.deepEqual(await provider.getStreams("1", "tv", 1, 1), []);
   ({ provider } = load("donghuaking.js", [], V3));
   assert.deepEqual(await provider.getStreams("1", "tv", 1, 1), []);
+});
+
+/* ===================== DonghuaStream ===================== */
+const DS = "https://donghuastream.org";
+const dsSlug = (n) => "beyond-times-gaze-episode-" + n + "-multiple-subtitles";
+// A row as the real series page renders it: label, "Eps N (Good Sub)(4K)+(Download Link)", date.
+const dsItem = (n) =>
+  '<li><a href="' + DS + "/" + dsSlug(n) + '/" title="Beyond Time’s Gaze Episode ' + n + ' Multiple Subtitles"><div class="epl-num">' + n +
+  '</div><div class="epl-title">Beyond Time’s Gaze Episode ' + n + ' Multiple Subtitles</div><div class="epl-sub">Eps ' + n +
+  ' (Good Sub)(4K)+(Download Link)</div><div class="epl-date">November 14, 2026</div></a></li>';
+const dsOptions = (n) => [
+  ["Dailymotion Multiple Sub ADS", "https://geo.dailymotion.com/player/xdsdm.html?video=kDsPrivateId" + n],
+  ["Rumble All Subtitles", "https://rumble.com/embed/v5ds" + n + "/"],
+  ["All Sub Player", "https://player.allsub.example/e/" + n],
+  ["Ok ru English", "https://ok.ru/videoembed/90" + n]
+];
+function dsRoutes() {
+  return [
+    tmdbTv(281233, { name: "Beyond Time's Gaze", seasons: [{ season_number: 1, episode_count: 26 }, { season_number: 2, episode_count: 52 }] }),
+    wpAnd(DS, [
+      { title: "Beyond Time’s Gaze Episode 48 Multiple Subtitles", url: DS + "/" + dsSlug(48) + "/" },
+      { title: "Beyond Time’s Gaze Episode 47 Multiple Subtitles", url: DS + "/" + dsSlug(47) + "/" },
+      { title: "Beyond Time’s Gaze", url: DS + "/anime/beyond-times-gaze/" }
+    ]),
+    at(DS + "/anime/beyond-times-gaze/", epList(Array.from({ length: 48 }, (_, i) => dsItem(48 - i)))),
+    // The page's default player is an empty iframe that scripts fill in later.
+    (u) => { const m = /\/beyond-times-gaze-episode-(\d+)-multiple-subtitles\/$/.exec(u); return m && { body: '<iframe src="about:blank"></iframe>' + mirrorPage(dsOptions(m[1])) }; },
+    (u) => { const m = /player\/metadata\/video\/kDsPrivateId(\d+)$/.exec(u); return m && { body: JSON.stringify(dmMeta("kds" + m[1])) }; },
+    (u) => { const m = /embedJS\/u3\/\?request=video&ver=2&v=v5ds(\d+)$/.exec(u); return m && { body: JSON.stringify(rumbleApi("ds" + m[1])) }; },
+    (u) => { const m = /ok\.ru\/videoembed\/90(\d+)$/.exec(u); return m && { body: okPage("ds" + m[1]) }; }
+  ];
+}
+
+test("donghuastream: Beyond Time’s Gaze resolves Dailymotion, Rumble and OK.ru; unknown players and about:blank are ignored", async () => {
+  const { provider, calls } = load("donghuastream.js", dsRoutes(), V3);
+  const streams = await provider.getStreams("281233", "tv", 1, 5);
+  const titles = streams.map((s) => s.title);
+  assert.equal(streams.length, 8, titles.join("\n")); // 2 Dailymotion + 2 Rumble + 4 OK.ru
+  assert.ok(titles.includes("Dailymotion Multiple Sub ADS"));
+  assert.ok(titles.includes("Dailymotion Multiple Sub ADS • 720p"));
+  assert.ok(titles.includes("Rumble All Subtitles • 720p"));
+  assert.ok(titles.includes("Ok ru English • 720p"));
+  assert.ok(streams.some((s) => s.url === "https://www.dailymotion.com/cdn/manifest/video/kds5.m3u8?auth=1"));
+  assert.ok(!calls.some((c) => /allsub\.example/.test(c.url)), "an unknown external player must not be contacted");
+  assert.ok(!calls.some((c) => /about:blank/.test(c.url)), "about:blank is not a link");
+  // The series page is preferred; the episode posts from the search are not downloaded as candidates.
+  assert.ok(!calls.some((c) => /episode-4[78]-multiple/.test(c.url)));
+});
+
+test("donghuastream: season 2 episode 22 is the site's episode 48, and episode 49 (unpublished) is not faked", async () => {
+  const { provider } = load("donghuastream.js", dsRoutes(), V3);
+  const streams = await provider.getStreams("281233", "tv", 2, 22);
+  assert.ok(streams.some((s) => s.url === "https://www.dailymotion.com/cdn/manifest/video/kds48.m3u8?auth=1"));
+  assert.deepEqual(await provider.getStreams("281233", "tv", 2, 23), []);
 });

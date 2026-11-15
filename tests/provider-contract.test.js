@@ -56,17 +56,18 @@ test("CHANGELOG documents the current Anichin version", () => {
   assert.ok(!/^-\s*$/m.test(changelog), "CHANGELOG.md contains an empty bullet");
 });
 
-test("anichin-care, animexin and donghuaking share an identical engine (after editing it, run: node tools/sync-engine.js)", () => {
+test("every theme-based provider shares an identical engine (after editing it, run: node tools/sync-engine.js)", () => {
   const START = "/* ==== SHARED ENGINE START ==== */";
   const END = "/* ==== SHARED ENGINE END ==== */";
+  const read = (name) => fs.readFileSync(path.join(root, "providers", name), "utf8");
   const engine = (name) => {
-    const text = fs.readFileSync(path.join(root, "providers", name), "utf8");
+    const text = read(name);
     const a = text.indexOf(START), b = text.indexOf(END);
     assert.ok(a >= 0 && b > a, name + " has no SHARED ENGINE markers");
     return text.slice(a, b + END.length);
   };
   const reference = engine("anichin-care.js");
-  for (const name of ["animexin.js", "donghuaking.js"]) {
-    assert.equal(engine(name), reference, name + " engine differs from anichin-care.js");
-  }
+  const others = fs.readdirSync(path.join(root, "providers")).filter((f) => f.endsWith(".js") && f !== "anichin-care.js" && read(f).includes(START));
+  assert.ok(others.length >= 3, "expected at least animexin, donghuaking and donghuastream to use the shared engine, found: " + others.join(", "));
+  for (const name of others) assert.equal(engine(name), reference, name + " engine differs from anichin-care.js");
 });

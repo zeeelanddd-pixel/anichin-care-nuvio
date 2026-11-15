@@ -4,19 +4,11 @@
  */
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { load, at, V3, mirrorPage, dmMeta, epItem, epList } = require("./helpers");
+const { load, at, V3, mirrorPage, dmMeta, epItem, epList, wpAnd } = require("./helpers");
 
 const AX = "https://animexin.dev";
 const DK = "https://donghuaking.in";
 const TMDB = (kind, id) => "https://api.themoviedb.org/3/" + kind + "/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3;
-
-// WordPress REST search: terms are ANDed and matched as substrings, so "Time's" never matches "Time’s" (curly).
-const wpAnd = (base, posts) => (u) => {
-  const prefix = base + "/wp-json/wp/v2/search?search=";
-  if (!u.startsWith(prefix)) return null;
-  const terms = decodeURIComponent(u.slice(prefix.length).split("&")[0]).toLowerCase().split(/\s+/).filter((t) => t.length > 1);
-  return { body: JSON.stringify(posts.filter((p) => terms.every((t) => p.title.toLowerCase().includes(t)))) };
-};
 
 /* ---- Beyond Time's Gaze on Animexin: curly apostrophe + continuous numbering ---- */
 // On the real site episode 6 lives at ".../beyond-times-gaze-episode-5-indonesia-english-sub-2/".
