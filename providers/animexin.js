@@ -4,11 +4,11 @@
  * Does not bypass challenges, login requirements, tokens, or access restrictions.
  *
  * Site-specific settings are the four variables below. Everything between the
- * SHARED ENGINE markers is identical in anichin-care.js, animexin.js and
- * donghuaking.js (all three sites use the same WordPress theme). Edit it in
+ * SHARED ENGINE markers is identical in anichin-care.js, animexin.js,
+ * donghuaking.js and donghuastream.js (all four sites use the same WordPress theme). Edit it in
  * anichin-care.js, then run `node tools/sync-engine.js`; the contract test fails if they differ.
  */
-var VERSION = "1.5.0";
+var VERSION = "1.6.0";
 var PROVIDER = "Animexin";
 var LOG_NAME = "AnimexinCare";
 var BASE = "https://animexin.dev";
@@ -23,7 +23,7 @@ var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TM
 var KNOWN_HOSTS = /(?:^|\.)(?:ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net|dai\.ly|d\.tube|dtube\.video|odysee\.com|odysee\.tv|lbry\.tv)$/;
 var OKRU_QUALITY = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
 // Words that describe the release rather than the series; ignored when comparing titles.
-var NOISE_WORDS = /\b(?:episode|eps?)\s*\d+(?:\.\d+)?(?:\s+\d+)?\b|\b(?:sub|subs|subtitle|subtitles|indo|indonesia|indonesian|english|eng|hardsub|softsub|dub|dubbed)\b/g;
+var NOISE_WORDS = /\b(?:episode|eps?)\s*\d+(?:\.\d+)?(?:\s+\d+)?\b|\b(?:sub|subs|subtitle|subtitles|indo|indonesia|indonesian|english|eng|hardsub|softsub|dub|dubbed|multiple|multi)\b/g;
 
 function log(msg) {
   try { console.log("[" + LOG_NAME + " v" + VERSION + "] " + String(msg)); } catch (e) {}
@@ -44,7 +44,7 @@ function stripTags(s) {
 }
 function absUrl(u, base) {
   u = decodeHtml(String(u || "").trim());
-  if (!u || /^(?:javascript|data|mailto|tel):|^#/i.test(u) || /[\s<>"]/.test(u)) return "";
+  if (!u || /^(?:javascript|data|mailto|tel|about|blob):|^#/i.test(u) || /[\s<>"]/.test(u)) return "";
   if (/^https?:\/\//i.test(u)) return u;
   if (u.indexOf("//") === 0) return "https:" + u;
   var b = String(base || BASE);
