@@ -1,6 +1,12 @@
 # Changelog
 
-Nomor versi di judul mengikuti provider Anichin (`manifest.json` → `anichin`). Perubahan Bilibili dan Odysee dicatat di entri yang sama.
+Nomor versi di judul adalah nomor rilis repo. Provider berbasis tema (Anichin, Animexin, DonghuaStream, DonghuaKing) berbagi nomor versi; perubahan Bilibili dan Odysee dicatat di entri yang sama dengan versinya sendiri.
+
+## 1.6.1
+
+### Bilibili (1.0.6)
+- Diaktifkan di manifest atas permintaan pemilik proyek (sebelumnya nonaktif bawaan). Kode tidak berubah selain nomor versi.
+- Perlu diketahui: Bilibili menjawab permintaan anonim dengan HTTP 412 dan jarang memuat subtitle Indonesia, jadi hasilnya sering kosong. Provider tidak memakai cookie atau tanda tangan permintaan. Bila diblokir ia mengembalikan hasil kosong; biayanya satu permintaan gagal tambahan per pencarian.
 
 ## 1.6.0
 

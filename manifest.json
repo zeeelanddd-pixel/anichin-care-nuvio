@@ -1,7 +1,7 @@
 {
   "name": "Anichin Providers",
-  "version": "1.6.0",
-  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, DonghuaKing (Bilibili and Odysee included but disabled).",
+  "version": "1.6.1",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, DonghuaKing and Bilibili (Odysee is included but disabled).",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
@@ -106,15 +106,15 @@
     {
       "id": "bilibili",
       "name": "Bilibili",
-      "description": "Disabled by default: Bilibili blocks anonymous API requests (HTTP 412) and rarely carries Indonesian subtitles. Public Bilibili API provider.",
-      "version": "1.0.5",
+      "description": "Public Bilibili video provider using the official web API. Bilibili often blocks anonymous requests (HTTP 412) and rarely carries Indonesian subtitles, so it frequently returns nothing.",
+      "version": "1.0.6",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
         "tv"
       ],
       "filename": "providers/bilibili.js",
-      "enabled": false,
+      "enabled": true,
       "logo": "",
       "contentLanguage": [
         "zh"

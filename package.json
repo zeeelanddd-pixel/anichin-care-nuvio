@@ -1,8 +1,8 @@
 {
   "name": "anichin-care-nuvio",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
-  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, DonghuaKing (Bilibili and Odysee included but disabled).",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, DonghuaKing and Bilibili (Odysee is included but disabled).",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"
