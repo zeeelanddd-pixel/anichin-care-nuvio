@@ -10,7 +10,9 @@ const START = "/* ==== SHARED ENGINE START ==== */";
 const END = "/* ==== SHARED ENGINE END ==== */";
 const dir = path.join(__dirname, "..", "providers");
 const SOURCE = "anichin-care.js";
-const TARGETS = ["animexin.js", "donghuaking.js"];
+// Every provider file that carries the markers is a target, so a new site only needs a header.
+const TARGETS = fs.readdirSync(dir)
+  .filter((f) => f.endsWith(".js") && f !== SOURCE && fs.readFileSync(path.join(dir, f), "utf8").includes(START));
 
 function engineOf(text, name) {
   const a = text.indexOf(START), b = text.indexOf(END);
