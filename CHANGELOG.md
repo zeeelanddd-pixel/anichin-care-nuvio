@@ -2,6 +2,20 @@
 
 Nomor versi di judul mengikuti provider Anichin (`manifest.json` → `anichin`). Perubahan Bilibili dan Odysee dicatat di entri yang sama.
 
+## 1.6.0
+
+### Provider baru
+- **DonghuaStream** (donghuastream.org): tema WordPress yang sama, jadi memakai mesin bersama. Situs ini paling segar (Beyond Time’s Gaze episode 48 terbit 14 November 2026, sehari lebih cepat dari Animexin). Server Dailymotion, Rumble, dan OK.ru didukung; "All Sub Player" dilewati bila host-nya tidak dikenal. Belum diuji langsung oleh pemilik proyek.
+- Anichin, Animexin, dan DonghuaKing naik ke 1.6.0 (provider berbasis tema ini berbagi nomor versi).
+
+### Mesin bersama
+- Kata "multiple" dan "multi" diabaikan saat membandingkan judul (judul episode DonghuaStream berakhiran "Multiple Subtitles"). Tanpa ini postingan episode tidak dikelompokkan bersama halaman serialnya, sehingga satu halaman episode yang besar ikut diunduh sia-sia pada setiap pencarian. Hasil streamnya sendiri tidak berubah.
+- `about:blank` (pemutar bawaan DonghuaStream sebelum diisi skrip) dan `blob:` tidak lagi diperlakukan sebagai tautan relatif.
+
+### Repo
+- `tools/sync-engine.js` dan test kontrak menemukan otomatis semua provider yang memakai mesin bersama: situs baru cukup menambah satu file berisi header empat variabel (`VERSION`, `PROVIDER`, `LOG_NAME`, `BASE`) plus entri manifest, lalu `npm run sync`.
+- `wpAnd` (tiruan pencarian WordPress) dipindah ke `tests/helpers.js`; test DonghuaStream memakai data berbentuk halaman aslinya.
+
 ## 1.5.0
 
 Berdasarkan hasil uji lapangan (Renegade Immortal dan Beyond Time’s Gaze): Anichin jalan di keduanya, Animexin hanya di Renegade Immortal, provider lain tidak menghasilkan stream.

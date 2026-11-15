@@ -1,14 +1,14 @@
 {
   "name": "Anichin Providers",
-  "version": "1.5.0",
-  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaKing (Bilibili and Odysee included but disabled).",
+  "version": "1.6.0",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, DonghuaKing (Bilibili and Odysee included but disabled).",
   "author": "zeeelanddd-pixel",
   "scrapers": [
     {
       "id": "anichin",
       "name": "Anichin",
       "description": "Anichin provider for publicly accessible video pages.",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
@@ -32,7 +32,7 @@
       "id": "animexin",
       "name": "Animexin",
       "description": "Animexin provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
@@ -54,10 +54,35 @@
       "supportsExternalPlayer": true
     },
     {
+      "id": "donghuastream",
+      "name": "DonghuaStream",
+      "description": "DonghuaStream provider for publicly accessible donghua mirrors (multiple subtitles).",
+      "version": "1.6.0",
+      "author": "zeeelanddd-pixel",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/donghuastream.js",
+      "enabled": true,
+      "logo": "",
+      "contentLanguage": [
+        "en",
+        "id"
+      ],
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true
+    },
+    {
       "id": "donghuaking",
       "name": "DonghuaKing",
       "description": "DonghuaKing provider for publicly accessible donghua mirrors (Indonesian and English subtitles).",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "author": "zeeelanddd-pixel",
       "supportedTypes": [
         "movie",
