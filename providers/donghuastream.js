@@ -3,15 +3,17 @@
  * Uses only publicly accessible pages and media URLs.
  * Does not bypass challenges, login requirements, tokens, or access restrictions.
  *
- * Site-specific settings are the four variables below. Everything between the
+ * Site-specific settings are the variables below. Everything between the
  * SHARED ENGINE markers is identical in anichin-care.js, animexin.js,
  * donghuaking.js and donghuastream.js (all four sites use the same WordPress theme). Edit it in
  * anichin-care.js, then run `node tools/sync-engine.js`; the contract test fails if they differ.
  */
-var VERSION = "1.6.0";
+var VERSION = "1.7.0";
 var PROVIDER = "DonghuaStream";
 var LOG_NAME = "DonghuaStreamCare";
 var BASE = "https://donghuastream.org";
+// true: when nothing is found, show one "⚠" card that says why. Set to false to hide it.
+var SHOW_DIAGNOSTICS = true;
 
 /* ==== SHARED ENGINE START ==== */
 var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
@@ -21,12 +23,33 @@ var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TM
 
 // Hosts whose embed pages this provider knows how to read (subdomains included).
 var KNOWN_HOSTS = /(?:^|\.)(?:ok\.ru|odnoklassniki\.ru|rumble\.com|dailymotion\.com|dmcdn\.net|dai\.ly|d\.tube|dtube\.video|odysee\.com|odysee\.tv|lbry\.tv)$/;
+// Players that need scripts or tokens this project does not work around; never fetched.
+var UNREADABLE_HOSTS = /(?:^|\.)(?:mega\.(?:nz|io)|streamwish|hlswish|embedwish|awish|dood|d000d|ds2play|vidhide|filemoon|mixdrop|streamtape|voe|vtube|drive\.google\.com|youtube\.com|youtu\.be|facebook\.com|vikingfile\.com|transfernow\.net|terabox)(?:\.|$)/i;
 var OKRU_QUALITY = { mobile: 144, lowest: 240, low: 360, sd: 480, hd: 720, full: 1080, quad: 1440, ultra: 2160 };
 // Words that describe the release rather than the series; ignored when comparing titles.
 var NOISE_WORDS = /\b(?:episode|eps?)\s*\d+(?:\.\d+)?(?:\s+\d+)?\b|\b(?:sub|subs|subtitle|subtitles|indo|indonesia|indonesian|english|eng|hardsub|softsub|dub|dubbed|multiple|multi)\b/g;
 
 function log(msg) {
   try { console.log("[" + LOG_NAME + " v" + VERSION + "] " + String(msg)); } catch (e) {}
+}
+// Why a lookup returned nothing. It is shown as one "⚠" card (SHOW_DIAGNOSTICS in the file header), so the
+// reason can be read in Nuvio itself. Higher stages are further along the pipeline and win over lower ones.
+var diag = { stage: 0, text: "", notes: [] };
+function resetDiag() { diag = { stage: 0, text: "", notes: [] }; }
+function why(stage, text) {
+  log("why[" + stage + "]: " + text);
+  if (stage >= diag.stage) { diag.stage = stage; diag.text = text; }
+}
+function warn(text) {
+  log(text);
+  if (diag.notes.length < 4 && diag.notes.indexOf(text) < 0) diag.notes.push(text);
+}
+function diagnosticCards() {
+  var on = typeof SHOW_DIAGNOSTICS !== "undefined" && SHOW_DIAGNOSTICS;
+  if (!on || (typeof DISABLE_DIAGNOSTICS !== "undefined" && DISABLE_DIAGNOSTICS)) return [];
+  var text = diag.text || "penyebab tidak diketahui";
+  if (diag.stage >= 6 && diag.notes.length) text += " [" + diag.notes.join("; ") + "]";
+  return [{ name: "⚠ " + PROVIDER, title: "Tidak ada stream: " + text, url: BASE + "/", quality: "Info", headers: { "User-Agent": UA } }];
 }
 function decodeHtml(s) {
   // &amp; is decoded last so "&amp;quot;" becomes "&quot;" and not a quote.
@@ -159,17 +182,20 @@ function fetchText(url, referer, deadline, extraHeaders) {
       if (!status) status = r.ok === false ? 500 : 200;
       if (status === 403 || status === 429 || status === 503) {
         log("Access denied with HTTP " + status + " on " + hostOf(url) + "; access restrictions will not be bypassed");
+        why(2, "situs memblokir permintaan (HTTP " + status + ") di " + hostOf(url) + "; tidak dicoba ditembus");
         return null;
       }
       if (status < 200 || status >= 400) { log("HTTP " + status + " on " + hostOf(url)); return null; }
       if (/cf-browser-verification|challenge-platform|just a moment/i.test(String(body || "").slice(0, 12000))) {
         log("challenge page detected on " + hostOf(url));
+        why(2, "situs menampilkan halaman verifikasi bot di " + hostOf(url) + "; tidak dicoba ditembus");
         return null;
       }
       return { url: r.url || url, text: String(body || ""), status: status };
     });
   }).catch(function (e) {
     log("Request failed for " + hostOf(url) + ": " + (e && e.message ? e.message : e));
+    why(2, "tidak bisa terhubung ke " + hostOf(url) + " (" + (e && e.message ? e.message : e) + ")");
     return null;
   });
 }
@@ -273,7 +299,7 @@ function htmlSearch(title, deadline) {
   var url = BASE + "/?s=" + encodeURIComponent(title);
   return fetchText(url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
-    var out = [], seen = {}, re = /<article\b[\s\S]*?<\/article>/gi, m;
+    var out = [], seen = {}, m, re = /<article\b[\s\S]*?<\/article>/gi;
     while ((m = re.exec(r.text))) {
       var a = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i.exec(m[0]);
       if (!a) continue;
@@ -281,6 +307,17 @@ function htmlSearch(title, deadline) {
       var tm = /\btitle=["']([^"']+)["']/i.exec(a[0]) || /<h[23][^>]*>([\s\S]*?)<\/h[23]>/i.exec(m[0]);
       var t = tm ? stripTags(tm[1]) : "";
       if (u && t && !seen[u]) { seen[u] = true; out.push({ url: u, title: t }); }
+    }
+    if (!out.length) {
+      // Other card layouts: any same-site link that carries a title attribute.
+      var site = hostOf(BASE), tag = /<a\b([^>]*)>/gi;
+      while ((m = tag.exec(r.text))) {
+        var h = /\bhref=["']([^"']+)["']/i.exec(m[1]), tt = /\btitle=["']([^"']+)["']/i.exec(m[1]);
+        if (!h || !tt) continue;
+        var link = absUrl(h[1], r.url);
+        if (!link || hostOf(link) !== site || seen[link]) continue;
+        seen[link] = true; out.push({ url: link, title: stripTags(tt[1]) });
+      }
     }
     return out;
   });
@@ -397,7 +434,7 @@ function decodeBase64(s) {
   return out;
 }
 function parseServerLinks(html, pageUrl) {
-  var out = [], seen = {}, pageHost = hostOf(pageUrl);
+  var out = [], seen = {}, pageHost = hostOf(pageUrl), skipped = {}, unknown = [], unknownSeen = {};
   function add(raw, label, explicit) {
     var decoded = String(raw || "").trim();
     if (!decoded) return;
@@ -414,6 +451,12 @@ function parseServerLinks(html, pageUrl) {
       // A site's own player page is a legitimate server when it is an explicit dropdown option.
       if (!explicit || u.split("#")[0] === String(pageUrl).split("#")[0]) return;
     } else if (!isKnownHost(h) && !isMedia(u)) {
+      skipped[h] = true;
+      // An unrecognised dropdown player is kept for a last-resort plain-text scan (never for blocked/obfuscated hosts).
+      if (explicit && !UNREADABLE_HOSTS.test(h) && !unknownSeen[u]) {
+        unknownSeen[u] = true;
+        unknown.push({ url: u, label: stripTags(label) || h });
+      }
       return;
     }
     seen[u] = true; out.push({ url: u, label: stripTags(label) || sourceName(h) });
@@ -433,6 +476,8 @@ function parseServerLinks(html, pageUrl) {
   // The page's default player is not always in the dropdown (DonghuaKing), so always read the iframes too.
   var iframe = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi, fm, count = 0;
   while ((fm = iframe.exec(html)) && count < 8) { add(fm[1], "Mirror", false); count++; }
+  out.skipped = Object.keys(skipped);
+  out.unknown = unknown;
   return out;
 }
 
@@ -457,7 +502,7 @@ function resolveGeneric(server, deadline) {
   return fetchText(server.url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
     var items = genericItems(r.text, r.url);
-    if (!items.length) log("No public media URL found in the " + hostOf(server.url) + " embed page");
+    if (!items.length) warn(hostOf(server.url) + ": halaman embed tidak memuat tautan video");
     return items;
   });
 }
@@ -501,12 +546,12 @@ function resolveOkru(server, deadline) {
     if (!r) return [];
     var info = okruInfo(r.text);
     if (!info) {
-      log("OK.ru: no data-options with flashvars (video removed or page changed)");
+      warn("OK.ru: video dihapus atau halaman berubah");
       return genericItems(r.text, r.url);
     }
     function fromMetadata(md) {
       if (!md) return [];
-      if (md.error) log("OK.ru: " + stripTags(String(md.error)));
+      if (md.error) warn("OK.ru: " + stripTags(String(md.error)));
       var items = okruItems(md, r.url);
       return items.length ? items : genericItems(JSON.stringify(md), r.url);
     }
@@ -514,10 +559,10 @@ function resolveOkru(server, deadline) {
     if (info.metadataUrl) {
       return fetchText(absUrl(info.metadataUrl, r.url), r.url, deadline).then(function (mr) {
         if (!mr) return [];
-        try { return fromMetadata(JSON.parse(mr.text)); } catch (e) { log("OK.ru: metadata is not valid JSON"); return []; }
+        try { return fromMetadata(JSON.parse(mr.text)); } catch (e) { warn("OK.ru: metadata tidak terbaca"); return []; }
       });
     }
-    log("OK.ru: flashvars has no metadata");
+    warn("OK.ru: tidak ada metadata video");
     return [];
   });
 }
@@ -535,7 +580,7 @@ function resolveDailymotion(server, deadline) {
     if (!r) return out;
     try {
       var j = JSON.parse(r.text);
-      if (j.error) log("Dailymotion: " + stripTags(String(j.error.message || j.error.title || j.error)));
+      if (j.error) warn("Dailymotion: " + stripTags(String(j.error.message || j.error.title || j.error)));
       var q = j.qualities || {};
       Object.keys(q).forEach(function (key) {
         (Array.isArray(q[key]) ? q[key] : []).forEach(function (entry) {
@@ -546,7 +591,7 @@ function resolveDailymotion(server, deadline) {
         });
       });
       out.sort(function (a, b) { return b.height - a.height; });
-    } catch (e) { log("Dailymotion: metadata is not valid JSON"); }
+    } catch (e) { warn("Dailymotion: metadata tidak terbaca"); }
     return out;
   }
   return fetchText(api, server.url, deadline).then(parse).then(function (items) {
@@ -586,7 +631,7 @@ function resolveRumble(server, deadline) {
         return out.slice(0, MAX_RESULTS);
       }
     } catch (e) {
-      log("Unable to read Rumble quality metadata");
+      warn("Rumble: data kualitas tidak terbaca");
     }
     return genericItems(r.text, r.url).map(function (it) { it.referer = server.url; return it; });
   });
@@ -606,11 +651,12 @@ function resolveServer(server, deadline) {
   } else {
     items = resolveGeneric(server, deadline);
   }
-  var source = sourceName(h);
-  return items.then(function (list) {
-    for (var i = 0; i < list.length; i++) { list[i].source = source; list[i].serverLabel = server.label; }
-    return list;
-  });
+  return items.then(function (list) { return tagItems(list, server); });
+}
+function tagItems(list, server) {
+  var source = sourceName(hostOf(server.url));
+  for (var i = 0; i < list.length; i++) { list[i].source = source; list[i].serverLabel = server.label; }
+  return list;
 }
 
 /* ---------- Stream assembly ---------- */
@@ -658,19 +704,31 @@ function buildStreams(resolved, pageUrl) {
   return rows.slice(0, MAX_RESULTS).map(function (row) { return row.stream; });
 }
 
+function epRange(eps) {
+  var lo = Infinity, hi = -Infinity;
+  for (var i = 0; i < eps.length; i++) { if (eps[i].num < lo) lo = eps[i].num; if (eps[i].num > hi) hi = eps[i].num; }
+  return lo + "–" + hi;
+}
 function getStreams(tmdbId, mediaType, season, episode) {
   var type = String(mediaType || "").toLowerCase();
   type = (type === "movie" || type === "film") ? "movie" : "tv";
   var s = Math.max(1, Number(season) || 1);
   var e = Math.max(1, Number(episode) || 1);
   var deadline = Date.now() + REQUEST_BUDGET_MS;
+  resetDiag();
   log("start type=" + type + " id=" + tmdbId + (type === "tv" ? " S" + s + "E" + e : ""));
   return tmdbTitle(tmdbId, type, deadline).then(function (meta) {
-    if (!meta || !meta.title) { log("TMDB title is unavailable"); return []; }
+    if (!meta || !meta.title) {
+      if (diag.stage < 2) why(1, "judul TMDB tidak bisa dibaca (periksa TMDB_API_KEY di Nuvio)");
+      return diagnosticCards();
+    }
     log("TMDB title: " + meta.titles.join(" / "));
     var offset = type === "tv" ? seasonOffset(meta.counts, s) : 0;
     return findSeries(meta.titles, s, deadline).then(function (candidates) {
-      if (!candidates.length) { log("Title not found in public search results"); return []; }
+      if (!candidates.length) {
+        if (diag.stage < 2) why(3, "tidak ada judul yang cocok dengan '" + meta.title + "' di pencarian " + hostOf(BASE));
+        return diagnosticCards();
+      }
       log("Candidates: " + candidates.map(function (c) { return c.title; }).join(" | "));
       var pageTasks = candidates.map(function (candidate) {
         return fetchText(candidate.url, BASE + "/", deadline).then(function (r) {
@@ -686,43 +744,62 @@ function getStreams(tmdbId, mediaType, season, episode) {
           // The search may have returned the episode post itself rather than the series page.
           var own = /\bepisode\s*0*(\d+(?:\.\d+)?)/i.exec(candidate.title);
           if (own && targets.indexOf(Number(own[1])) >= 0) return { page: r };
+          if (diag.stage < 4) {
+            why(4, eps.length
+              ? "'" + candidate.title + "' ditemukan, tetapi episode " + targets.join("/") + " tidak ada (terdaftar " + eps.length + " episode: " + epRange(eps) + ")"
+              : "'" + candidate.title + "' ditemukan, tetapi daftar episodenya tidak terbaca");
+          }
           return null;
         });
       });
       return Promise.all(pageTasks).then(function (results) {
         var chosen = null;
         for (var k = 0; k < results.length; k++) if (results[k]) { chosen = results[k]; break; }
-        if (!chosen) { log("No matching page or episode was found"); return []; }
+        if (!chosen) { log("No matching page or episode was found"); return diagnosticCards(); }
         var pagePromise = chosen.page ? Promise.resolve(chosen.page) : fetchText(chosen.pageUrl, BASE + "/", deadline);
         return pagePromise.then(function (page) {
           if (!page) return null;
           var servers = parseServerLinks(page.text, page.url);
-          if (servers.length || type !== "movie") return { page: page, servers: servers };
+          if (servers.length || servers.unknown.length || type !== "movie") return { page: page, servers: servers };
           var next = firstEpisodeLink(page.text, page.url);
           if (!next || sameUrl(next, page.url)) return { page: page, servers: servers };
           return fetchText(next, BASE + "/", deadline).then(function (watch) {
-            return watch ? { page: watch, servers: parseServerLinks(watch.text, watch.url) } : { page: page, servers: [] };
+            return watch ? { page: watch, servers: parseServerLinks(watch.text, watch.url) } : { page: page, servers: servers };
           });
         }).then(function (found) {
-          if (!found) return [];
-          log("Mirrors found: " + found.servers.length);
-          if (!found.servers.length) return [];
-          return Promise.all(found.servers.map(function (server) {
+          if (!found) return diagnosticCards();
+          var servers = found.servers, unknown = servers.unknown || [];
+          log("Mirrors found: " + servers.length + (unknown.length ? " (+" + unknown.length + " unrecognised)" : ""));
+          if (!servers.length && !unknown.length) {
+            why(5, "halaman episode tidak memuat server yang didukung" + (servers.skipped.length ? " (dilewati: " + servers.skipped.join(", ") + ")" : ""));
+            return diagnosticCards();
+          }
+          return Promise.all(servers.map(function (server) {
             return Promise.resolve().then(function () { return resolveServer(server, deadline); }).catch(function (err) {
               log("Resolver error for " + hostOf(server.url) + ": " + (err && err.message ? err.message : err));
               return [];
             });
           })).then(function (resolved) {
             var streams = buildStreams(resolved, found.page.url);
+            if (streams.length || !unknown.length) return streams;
+            // Nothing from the known hosts: try the unrecognised dropdown players once (plain-text media links only).
+            return Promise.all(unknown.map(function (server) {
+              return resolveGeneric(server, deadline).then(function (list) { return tagItems(list, server); });
+            })).then(function (extra) { return buildStreams(extra, found.page.url); });
+          }).then(function (streams) {
             log("Direct streams found: " + streams.length);
-            return streams;
+            if (streams.length) return streams;
+            var labels = servers.concat(unknown).slice(0, 4).map(function (x) { return x.label; });
+            why(6, "server ditemukan (" + labels.join(", ") + ") tetapi tidak ada tautan video yang terbaca");
+            return diagnosticCards();
           });
         });
       });
     });
   }).catch(function (err) {
     log("getStreams error: " + (err && err.message ? err.message : err));
-    return [];
+    if (!diag.text) why(0, "kesalahan tak terduga: " + (err && err.message ? err.message : err));
+    return diagnosticCards();
   });
 }
 module.exports = { getStreams: getStreams };
