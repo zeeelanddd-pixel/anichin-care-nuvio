@@ -2,6 +2,33 @@
 
 Nomor versi di judul adalah nomor rilis repo. Provider berbasis tema (Anichin, Animexin, DonghuaStream, DonghuaKing) berbagi nomor versi; perubahan Bilibili dan Odysee dicatat di entri yang sama dengan versinya sendiri.
 
+## 1.7.0
+
+Berdasarkan laporan: hanya Anichin dan Animexin yang menghasilkan stream; Bilibili menemukan video tetapi tidak bisa diputar.
+
+### Kartu "⚠" penjelasan (mesin bersama dan Bilibili)
+- Bila tidak ada stream, provider menampilkan satu kartu `⚠ <Provider>` yang menyebut penyebabnya: situs memblokir (HTTP 403/429/503) atau meminta verifikasi bot, tidak bisa terhubung, judul tidak cocok, episode tidak ada (dengan rentang yang terdaftar, mis. 69–121), tidak ada server yang didukung (dengan daftar host yang dilewati), atau server ada tetapi videonya tidak terbaca (mis. "OK.ru: video dihapus"). Tidak ada upaya menembus pemblokiran.
+- Dinyalakan bawaan supaya kegagalan bisa dilaporkan dengan tangkapan layar. Matikan dengan `var SHOW_DIAGNOSTICS = false;` di bagian atas file provider.
+
+### Mesin bersama (Anichin, Animexin, DonghuaStream, DonghuaKing)
+- Pencarian HTML kini juga membaca tata letak kartu tanpa tag `<article>` (tautan sesitus yang punya atribut `title`), untuk situs yang menonaktifkan pencarian REST.
+- Pemutar di dropdown yang hostnya tidak dikenal (mis. "All Sub Player") dipindai sebagai langkah terakhir, hanya bila tidak ada stream dari host yang dikenal, dan hanya untuk tautan media yang tertulis jelas di halamannya. Host yang butuh skrip atau token (Mega, Streamwish, Dood, Vidhide, Filemoon, Mixdrop, Streamtape, VOE, YouTube, vikingfile, dll.) tidak pernah diminta.
+
+### Bilibili (1.1.0)
+- Penyebab paling mungkin "ada tetapi tidak bisa diputar": URL `http://` diteruskan apa adanya, padahal Android memblokir HTTP polos. Kini diubah ke HTTPS.
+- Meminta `platform=html5` agar mendapat MP4 (bukan FLV); CDN cadangan `mcdn`, `pcdn`, dan IP berporta, yang tidak bisa dipakai pemutar, dibuang; mirror `upos-*` diutamakan.
+- Setiap URL diperiksa dengan permintaan `Range` berheader pemutar sebelum ditampilkan, sehingga URL yang ditolak CDN (403/404) tidak muncul.
+- Klip, trailer, dan PV (kurang dari 8 menit) dilewati.
+- Koreksi: README sebelumnya menyebut Bilibili "diblokir HTTP 412". Itu dugaan yang salah; laporan pemilik proyek menunjukkan ia menemukan video.
+
+### Tidak ditambahkan
+- **YouTube:** URL stream berasal dari API klien privat YouTube dan dijaga tanda tangan serta token anti-bot yang sering berubah; mengambilnya berarti mengakali perlindungan itu, yang tidak dilakukan proyek ini.
+- **iQIYI:** stream berDRM, diminta dengan parameter bertanda tangan, dan dibatasi wilayah.
+- **AnimeCube:** aplikasi JavaScript (HTML halamannya kerangka kosong) yang sumber videonya dikirim dari API terenkripsi untuk pemutarnya sendiri; membacanya berarti mendekripsi payload itu.
+
+### Repo
+- `tests/diagnostics.test.js` (9 test) dan `tests/bilibili.test.js` (4 test).
+
 ## 1.6.1
 
 ### Bilibili (1.0.6)
