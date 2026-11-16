@@ -207,12 +207,14 @@ test("bilibili: matches the requested episode only and returns playable URLs", a
     at("https://api.bilibili.com/x/web-interface/search/type", search),
     at("https://api.bilibili.com/x/web-interface/view?bvid=BV1aa", { code: 0, data: { bvid: "BV1aa", cid: 111, title: "Fake Show Episode 3", duration: 1400 } }),
     at("https://api.bilibili.com/x/player/playurl?bvid=BV1aa&cid=111", {
-      code: 0, data: { quality: 64, durl: [{ url: "https://upos.example/a.mp4", backup_url: ["https://upos2.example/a.mp4"] }] }
-    })
+      code: 0, data: { quality: 64, durl: [{ url: "https://upos-sz-mirrorcos.bilivideo.com/a.mp4", backup_url: ["https://upos-hz-mirrorakam.akamaized.net/a.mp4"] }] }
+    }),
+    // the player-facing URL is probed with a Range request before it is offered
+    (u) => /bilivideo\.com|akamaized\.net/.test(u) && { status: 206, body: "" }
   ];
   const { provider, calls } = load("bilibili.js", routes, V3);
   const streams = await provider.getStreams("1234", "tv", 1, 3);
-  assert.deepEqual(streams.map((s) => s.url), ["https://upos.example/a.mp4", "https://upos2.example/a.mp4"]);
+  assert.deepEqual(streams.map((s) => s.url), ["https://upos-sz-mirrorcos.bilivideo.com/a.mp4", "https://upos-hz-mirrorakam.akamaized.net/a.mp4"]);
   assert.equal(streams[0].quality, "720p");
   assert.equal(streams[0].headers.Referer, "https://www.bilibili.com/video/BV1aa/");
   assert.ok(!calls.some((c) => /BV2bb|BV3cc|BV4dd/.test(c.url)), "other episodes / titles must not be resolved");

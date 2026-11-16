@@ -24,7 +24,8 @@ function makeResponse(spec, url) {
   };
 }
 // routes: functions (url, opts) => { body, status? } | falsy. Unmatched URLs reject like a dead network.
-function load(file, routes, key) {
+// opts.diagnostics = true keeps the "⚠" explanation card; by default tests see a plain [] when nothing is found.
+function load(file, routes, key, opts) {
   const calls = [];
   global.fetch = function (url, opts) {
     url = String(url);
@@ -35,6 +36,7 @@ function load(file, routes, key) {
     }
     return Promise.reject(new Error("no mock route for " + url));
   };
+  global.DISABLE_DIAGNOSTICS = !(opts && opts.diagnostics);
   if (key === undefined) delete global.TMDB_API_KEY; else global.TMDB_API_KEY = key;
   const full = path.join(PROVIDERS, file);
   delete require.cache[require.resolve(full)];
