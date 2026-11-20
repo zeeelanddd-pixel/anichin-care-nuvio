@@ -2,6 +2,38 @@
 
 Nomor versi di judul adalah nomor rilis repo. Provider berbasis tema (Anichin, Animexin, DonghuaStream, DonghuaKing) berbagi nomor versi; perubahan Bilibili dan Odysee dicatat di entri yang sama dengan versinya sendiri.
 
+## 1.8.0
+
+### Ukuran file di stream
+- File progresif (MP4) kini menampilkan ukurannya di baris `quality` yang tampil di kartu Nuvio: `720p • 245.3 MB`. Ukuran juga ada di `title` dan field `size`.
+- Sumbernya hanya yang dilaporkan server: jawaban `HEAD` dari CDN (tidak ada yang diunduh), `meta.size` dari Rumble, dan `size` dari `playurl` Bilibili (atau total `Content-Range` dari probe-nya). Bila tidak ada yang melaporkan, ukuran tidak ditampilkan; tidak ada perkiraan. HLS (`Auto`) tidak punya satu file dan tidak diberi ukuran.
+- Pembacaan ukuran dibatasi 6 detik dan tidak pernah menghilangkan stream. Tidak memakai GET berentang: server yang mengabaikan `Range` akan mengirim seluruh file.
+
+### Provider baru
+- **LuciferDonghua** (luciferdonghua.in, 1.8.0): tema yang sama dengan Anichin (terverifikasi dari halaman episodenya: path tema `animestream`, dropdown "Select Video Server"). Server Dailymotion (Indo + Eng), Rumble, dan OK.ru dibaca; server VidHide tidak. Sudah sampai Renegade Immortal episode 167 pada hari tayangnya.
+- **Dailymotion** (1.0.0): mencari lewat API publik resmi (`api.dailymotion.com/videos` dengan `search`, `fields`, `sort=relevance`, `longer_than=8`, `private=false`, `password_protected=false`) dan memutar video publik lewat endpoint metadata yang dipakai pemutar embed Dailymotion. Pencocokan ketat: judul, nomor episode eksplisit ("Episode 166", "EP 166", "S1E5"), durasi minimal 8 menit, tanpa trailer/preview/klip, tanpa episode serial lain atau musim lain; unggahan "Sub Indo" diutamakan. Nomor episode lanjutan dipetakan seperti di provider situs.
+- AnimeKhor dicek tetapi tidak ditambahkan: situs itu memblokir permintaan otomatis dengan deteksi bot, dan proyek ini tidak menembusnya.
+
+### Versi
+- Provider berbasis tema (Anichin, Animexin, DonghuaStream, LuciferDonghua, DonghuaKing) membawa nomor versi mesin bersama: 1.8.0. Bilibili 1.2.0.
+
+### Repo
+- `tests/dailymotion.test.js` (5 test) dan `tests/sizes.test.js` (3 test); test LuciferDonghua di `tests/themesia-sites.test.js`.
+- Test ukuran menemukan bug di `dailymotion.js` (HEAD ikut dikirim ke URL HLS karena regex salah escape) sebelum rilis.
+
+## 1.7.1
+
+Perbaikan atas kartu "⚠" versi 1.7.0. Tangkapan layar dari HP menunjukkan kartu muncul tetapi hanya bertuliskan "⚠ DonghuaStream" dan "Info": Nuvio hanya menampilkan baris `name` (tebal) dan `quality` (di bawahnya), bukan `title`, tempat penjelasan saya taruh.
+
+### Mesin bersama dan Bilibili (1.1.1)
+- Penyebab singkat kini ada di `name` (mis. "⚠ Diblokir situs (HTTP 403)") dan rinciannya di `quality` (mis. "donghuastream.org menolak permintaan Nuvio"). `title` tetap berisi kalimat lengkap.
+- Pencarian mencatat jawaban situs: jumlah hasil pencarian REST ("wp") dan pencarian halaman ("cari"), beserta dua judul yang dikembalikan situs tetapi ditolak, sehingga salah nama langsung terlihat. Jawaban HTTP bukan-OK (mis. 404 pada pencarian REST) ikut dicatat.
+- Detail "episode tidak ada" menyebut rentang yang terdaftar; detail "video tidak terbaca" menyebut server dan alasan tiap resolver.
+
+### Repo
+- Test kini memeriksa baris yang benar-benar tampil di layar (`name` dan `quality`). Itulah celah yang meloloskan bug ini di 1.7.0; test baru gagal di 1.7.0 dengan keluaran persis seperti tangkapan layar.
+- README: tabel arti tiap kartu.
+
 ## 1.7.0
 
 Berdasarkan laporan: hanya Anichin dan Animexin yang menghasilkan stream; Bilibili menemukan video tetapi tidak bisa diputar.
