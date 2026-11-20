@@ -41,9 +41,10 @@ test("bilibili: a URL the CDN refuses is not offered, and the card says why", as
   let { provider } = load("bilibili.js", [tmdb, search(0), view(1400), play(durl), cdn(403)], V3, on);
   let out = await provider.getStreams("1234", "tv", 1, 3);
   assert.equal(out.length, 1);
-  assert.match(out[0].name, /^⚠/);
   assert.match(out[0].title, /Bilibili menolak pemutaran \(HTTP 403\) untuk 'Fake Show Episode 3'/);
-  assert.equal(out[0].quality, "Info");
+  // the two lines the phone actually shows
+  assert.equal(out[0].name, "⚠ CDN menolak pemutaran (HTTP 403)");
+  assert.equal(out[0].quality, "'Fake Show Episode 3'");
   // with the card switched off the result is simply empty
   ({ provider } = load("bilibili.js", [tmdb, search(0), view(1400), play(durl), cdn(403)], V3));
   assert.deepEqual(await provider.getStreams("1234", "tv", 1, 3), []);
@@ -54,16 +55,26 @@ test("bilibili: clips and trailers shorter than eight minutes are skipped", asyn
   const { provider, calls } = load("bilibili.js", [tmdb, search(0), view(150), play(durl), cdn(206)], V3, on);
   const out = await provider.getStreams("1234", "tv", 1, 3);
   assert.match(out[0].title, /hanya klip pendek \(kurang dari 8 menit\) yang cocok dengan 'Fake Show'/);
+  assert.equal(out[0].name, "⚠ Hanya klip pendek");
+  assert.equal(out[0].quality, "kurang dari 8 menit untuk 'Fake Show'");
   assert.ok(!calls.some((c) => c.url.includes("/x/player/playurl")), "a clip is not even asked for a play URL");
 });
 
 test("bilibili: only unusable CDN links, a blocked search and a missing key are each explained", async () => {
   let { provider } = load("bilibili.js", [tmdb, search(0), view(1400), play([{ url: "http://xy1.mcdn.bilivideo.cn:4483/c.mp4" }])], V3, on);
-  assert.match((await provider.getStreams("1234", "tv", 1, 3))[0].title, /tidak memberi URL video yang bisa diputar.*hanya CDN yang tidak didukung/);
+  let card = (await provider.getStreams("1234", "tv", 1, 3))[0];
+  assert.match(card.title, /tidak memberi URL video yang bisa diputar.*hanya CDN yang tidak didukung/);
+  assert.equal(card.name, "⚠ Tidak ada URL yang bisa diputar");
+  assert.equal(card.quality, "hanya CDN yang tidak didukung: 'Fake Show Episode 3'");
 
   ({ provider } = load("bilibili.js", [tmdb, search(-412)], V3, on));
-  assert.match((await provider.getStreams("1234", "tv", 1, 3))[0].title, /api\.bilibili\.com menolak permintaan \(code -412: request was banned\)/);
+  card = (await provider.getStreams("1234", "tv", 1, 3))[0];
+  assert.match(card.title, /api\.bilibili\.com menolak permintaan \(code -412: request was banned\)/);
+  assert.equal(card.name, "⚠ Bilibili menolak (code -412)");
+  assert.equal(card.quality, "request was banned");
 
   ({ provider } = load("bilibili.js", [], undefined, on));
-  assert.match((await provider.getStreams("1234", "tv", 1, 3))[0].title, /judul TMDB tidak bisa dibaca \(periksa TMDB_API_KEY/);
+  card = (await provider.getStreams("1234", "tv", 1, 3))[0];
+  assert.match(card.title, /judul TMDB tidak bisa dibaca \(periksa TMDB_API_KEY/);
+  assert.equal(card.name, "⚠ Judul TMDB tidak terbaca");
 });

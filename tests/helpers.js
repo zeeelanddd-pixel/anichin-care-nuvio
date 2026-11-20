@@ -20,6 +20,7 @@ function makeResponse(spec, url) {
     status: status,
     ok: status >= 200 && status < 300,
     url: spec.url || url,
+    headers: { get: function (name) { const h = spec.headers || {}; const v = h[String(name).toLowerCase()]; return v === undefined ? null : String(v); } },
     text: function () { return Promise.resolve(spec.body == null ? "" : String(spec.body)); }
   };
 }

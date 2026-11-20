@@ -1,5 +1,6 @@
 /*
  * When nothing is found, a provider shows ONE "⚠" card saying why, so the cause can be read in Nuvio itself.
+ * Nuvio's card shows only `name` (bold line) and `quality` (line below), so the cause must be readable from those two.
  * Also covers the tolerant HTML search and the last-resort scan of unrecognised dropdown players.
  */
 const assert = require("node:assert/strict");
@@ -14,9 +15,11 @@ const only = (streams) => { assert.equal(streams.length, 1, JSON.stringify(strea
 test("diagnostics: a blocked site is reported as blocked, and nothing is bypassed", async () => {
   const { provider, calls } = load("donghuastream.js", [tmdb(), (u) => u.startsWith(DS) && { status: 403, body: "denied" }], V3, on);
   const card = only(await provider.getStreams("7", "tv", 1, 1));
-  assert.match(card.name, /^⚠/);
+  // What the phone shows: the two visible lines name the cause. (A card that said only "⚠ DonghuaStream / Info" was the bug.)
+  assert.equal(card.name, "⚠ Diblokir situs (HTTP 403)");
+  assert.equal(card.quality, "donghuastream.org menolak permintaan Nuvio");
+  assert.ok(card.name.length <= 60 && card.quality.length <= 150 && card.quality !== "Info");
   assert.match(card.title, /^Tidak ada stream: situs memblokir permintaan \(HTTP 403\) di donghuastream\.org/);
-  assert.equal(card.quality, "Info");
   assert.equal(card.url, DS + "/");
   // One plain request per search route; no retry loop, no header tricks.
   assert.ok(calls.every((c) => !/cf-|x-forwarded/i.test(JSON.stringify(c.opts.headers || {}))));
@@ -24,16 +27,33 @@ test("diagnostics: a blocked site is reported as blocked, and nothing is bypasse
 
 test("diagnostics: a bot-check page and a dead network are told apart", async () => {
   let { provider } = load("donghuastream.js", [tmdb(), (u) => u.startsWith(DS) && { body: "<title>Just a moment...</title>" }], V3, on);
-  assert.match(only(await provider.getStreams("7", "tv", 1, 1)).title, /halaman verifikasi bot di donghuastream\.org/);
+  let card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.match(card.title, /halaman verifikasi bot di donghuastream\.org/);
+  assert.equal(card.name, "⚠ Halaman verifikasi bot");
+  assert.match(card.quality, /donghuastream\.org meminta verifikasi/);
   ({ provider } = load("donghuastream.js", [tmdb()], V3, on));
-  assert.match(only(await provider.getStreams("7", "tv", 1, 1)).title, /tidak bisa terhubung ke donghuastream\.org/);
+  card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.match(card.title, /tidak bisa terhubung ke donghuastream\.org/);
+  assert.equal(card.name, "⚠ Tidak bisa terhubung");
+  assert.match(card.quality, /^donghuastream\.org \(/);
 });
 
 test("diagnostics: TMDB problems and an unknown title", async () => {
   let { provider } = load("donghuastream.js", [], undefined, on); // no key and no TMDB web page
   assert.match(only(await provider.getStreams("7", "tv", 1, 1)).title, /tidak bisa terhubung ke (api\.)?themoviedb\.org|judul TMDB/);
   ({ provider } = load("donghuastream.js", [tmdb(), at(DS + "/wp-json/wp/v2/search", []), at(DS + "/?s=", "<html></html>")], V3, on));
-  assert.match(only(await provider.getStreams("7", "tv", 1, 1)).title, /tidak ada judul yang cocok dengan 'Fake Show' di pencarian donghuastream\.org/);
+  const card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.match(card.title, /tidak ada judul yang cocok dengan 'Fake Show' di pencarian donghuastream\.org/);
+  assert.equal(card.name, "⚠ Judul tidak ada di situs");
+  assert.match(card.quality, /'Fake Show': wp 0, cari 0/);
+});
+
+test("diagnostics: when the site answers with other titles, they are shown (a naming mismatch is visible at a glance)", async () => {
+  const posts = [{ title: "Completely Different Series", url: DS + "/a/" }, { title: "Another Thing Entirely", url: DS + "/b/" }];
+  const { provider } = load("donghuastream.js", [tmdb(), at(DS + "/wp-json/wp/v2/search", posts), at(DS + "/?s=", "<html></html>")], V3, on);
+  const card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.equal(card.name, "⚠ Judul tidak ada di situs");
+  assert.match(card.quality, /wp 2, cari 0 \[Completely Different Series \| Another Thing Entirely\]/);
 });
 
 test("diagnostics: the title exists but the episode does not (shows the listed range)", async () => {
@@ -41,7 +61,10 @@ test("diagnostics: the title exists but the episode does not (shows the listed r
   for (let n = 69; n <= 121; n++) eps.push(epItem(DS, "Fake Show", n, "fake-show-episode-" + n));
   const routes = [tmdb(), wpAnd(DS, [{ title: "Fake Show", url: DS + "/anime/fake-show/" }]), at(DS + "/anime/fake-show/", epList(eps))];
   const { provider } = load("donghuastream.js", routes, V3, on);
-  assert.match(only(await provider.getStreams("7", "tv", 1, 130)).title, /'Fake Show' ditemukan, tetapi episode 130 tidak ada \(terdaftar 53 episode: 69–121\)/);
+  const card = only(await provider.getStreams("7", "tv", 1, 130));
+  assert.match(card.title, /'Fake Show' ditemukan, tetapi episode 130 tidak ada \(terdaftar 53 episode: 69–121\)/);
+  assert.equal(card.name, "⚠ Episode 130 tidak ada");
+  assert.equal(card.quality, "'Fake Show' hanya terdaftar 53 episode (69–121)");
 });
 
 function episodeRoutes(options, extra) {
@@ -56,16 +79,21 @@ function episodeRoutes(options, extra) {
 test("diagnostics: only unsupported players are named, and they are never contacted", async () => {
   const routes = episodeRoutes([["Mega", "https://mega.nz/embed/abc"], ["Streamwish", "https://streamwish.to/e/abc"]]);
   const { provider, calls } = load("donghuastream.js", routes, V3, on);
-  assert.match(only(await provider.getStreams("7", "tv", 1, 1)).title, /halaman episode tidak memuat server yang didukung \(dilewati: mega\.nz, streamwish\.to\)/);
+  const card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.match(card.title, /halaman episode tidak memuat server yang didukung \(dilewati: mega\.nz, streamwish\.to\)/);
+  assert.equal(card.name, "⚠ Server tidak didukung");
+  assert.equal(card.quality, "dilewati: mega.nz, streamwish.to");
   assert.ok(!calls.some((c) => /mega\.nz|streamwish/.test(c.url)));
 });
 
 test("diagnostics: a known host whose video was removed explains it", async () => {
   const routes = episodeRoutes([["Ok ru English", "https://ok.ru/videoembed/1"]], [at("https://ok.ru/videoembed/1", "<html>Video not found</html>")]);
   const { provider } = load("donghuastream.js", routes, V3, on);
-  const title = only(await provider.getStreams("7", "tv", 1, 1)).title;
-  assert.match(title, /server ditemukan \(Ok ru English\) tetapi tidak ada tautan video yang terbaca/);
-  assert.match(title, /OK\.ru: video dihapus atau halaman berubah/);
+  const card = only(await provider.getStreams("7", "tv", 1, 1));
+  assert.match(card.title, /server ditemukan \(Ok ru English\) tetapi tidak ada tautan video yang terbaca/);
+  assert.match(card.title, /OK\.ru: video dihapus atau halaman berubah/);
+  assert.equal(card.name, "⚠ Video tidak terbaca");
+  assert.equal(card.quality, "Ok ru English — OK.ru: video dihapus atau halaman berubah");
 });
 
 test("unrecognised dropdown player: scanned only when nothing else works, and only for plain-text media links", async () => {

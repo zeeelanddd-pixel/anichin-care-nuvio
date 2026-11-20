@@ -262,3 +262,61 @@ test("donghuastream: season 2 episode 22 is the site's episode 48, and episode 4
   assert.ok(streams.some((s) => s.url === "https://www.dailymotion.com/cdn/manifest/video/kds48.m3u8?auth=1"));
   assert.deepEqual(await provider.getStreams("281233", "tv", 2, 23), []);
 });
+
+/* ===================== LuciferDonghua ===================== */
+const LD = "https://luciferdonghua.in";
+// Rows as the real "All Episodes" grid renders them: "4K Ep N Episode N <date>", older ones with "-ep-N" URLs.
+const ldRow = (slug, label) => '<li><a href="' + LD + "/" + slug + '/"><div class="epl-title">' + label + "</div></a></li>";
+const ldList = '<div class="eplister"><ul>' + [
+  ldRow("renegade-immortal-xian-ni-episode-167-lucifer-donghua", "4K Ep 167 Episode 167 Nov 15, 2026"),
+  ldRow("renegade-immortal-xian-ni-episode-166-lucifer-donghua", "4K Ep 166 Episode 166 Nov 8, 2026"),
+  ldRow("renegade-immortal-xian-ni-episode-84", "4K Ep 84 Episode 84"),
+  ldRow("renegade-immortal-xian-ni-ep-77", "4K Ep 77 Battle of Gods [PT-3] Episode 77 Battle of Gods [PT-3]"),
+  ldRow("renegade-immortal-xian-ni-ep-09", "4K Ep 09 Episode 09")
+].join("") + "</ul></div>";
+
+function ldRoutes() {
+  return [
+    tmdbTv(62940, { name: "Renegade Immortal", original_name: "仙逆" }),
+    wpAnd(LD, [
+      { title: "Renegade Immortal [Xian Ni] Episode 166 English Sub", url: LD + "/renegade-immortal-xian-ni-episode-166-lucifer-donghua/" },
+      { title: "Renegade Immortal [Xian Ni] (2023)", url: LD + "/anime/renegade-immortal-xian-ni/" }
+    ]),
+    at(LD + "/anime/renegade-immortal-xian-ni/", ldList),
+    at(LD + "/renegade-immortal-xian-ni-episode-166-lucifer-donghua/", mirrorPage([
+      ["[4K] Indo + Eng [Dailymotion Little Ads - Server]", "https://geo.dailymotion.com/player/xldm.html?video=kLuciferPrivate1"],
+      ["[4K] Eng [RUMBEL- Server]", "https://rumble.com/embed/v5lucifer/"],
+      ["[4K] Eng [VID HIDE Server with ads]", "https://vidhide.example/e/abc"],
+      ["[4K] Eng [OK.RU- Server]", "https://ok.ru/videoembed/777"]
+    ])),
+    at("https://www.dailymotion.com/player/metadata/video/kLuciferPrivate1", dmMeta("kl")),
+    at("https://rumble.com/embedJS/u3/?request=video&ver=2&v=v5lucifer", rumbleApi("lucifer")),
+    at("https://ok.ru/videoembed/777", okPage("luc")),
+    // every other episode page: one plain mirror named after its slug
+    (u) => { const m = /\/(renegade-immortal-xian-ni-[a-z0-9-]+)\/$/.exec(u); return m && !/episode-166-/.test(u) && !/\/anime\//.test(u) && { body: mirrorPage([["Server", "https://cdn.example.net/" + m[1] + ".m3u8"]]) }; }
+  ];
+}
+
+test("luciferdonghua: bracketed alias and year in the title, and the real server labels (Indonesian option first, VidHide never contacted)", async () => {
+  const { provider, calls } = load("luciferdonghua.js", ldRoutes(), V3);
+  const streams = await provider.getStreams("62940", "tv", 1, 166);
+  const titles = streams.map((s) => s.title);
+  assert.equal(streams.length, 8, titles.join("\n")); // 2 Dailymotion + 2 Rumble + 4 OK.ru
+  // Both Dailymotion variants (720p MP4 and the Auto HLS) belong to the "Indo + Eng" option and must come before every English-only one.
+  assert.deepEqual(titles.slice(0, 2).sort(), ["[4K] Indo + Eng [Dailymotion Little Ads - Server]", "[4K] Indo + Eng [Dailymotion Little Ads - Server] • 720p"]);
+  assert.ok(titles.slice(2).every((t) => !/Indo \+ Eng/.test(t)), "the Indonesian option must come first");
+  // The site spells it "RUMBEL", so the real source name is appended; "OK.RU" already contains the source and is not repeated.
+  assert.ok(titles.includes("[4K] Eng [RUMBEL- Server] • Rumble • 720p"));
+  assert.ok(titles.includes("[4K] Eng [OK.RU- Server] • 720p"));
+  assert.ok(!calls.some((c) => /vidhide/.test(c.url)), "VidHide needs scripts this project does not run");
+  assert.ok(streams.every((s) => s.headers.Referer && s.headers["User-Agent"]));
+});
+
+test("luciferdonghua: 'Ep 167', 'Ep 09' and the old '-ep-77' URL style are all found by their labels", async () => {
+  const { provider } = load("luciferdonghua.js", ldRoutes(), V3);
+  const url = async (e) => (await provider.getStreams("62940", "tv", 1, e)).map((s) => s.url);
+  assert.deepEqual(await url(167), ["https://cdn.example.net/renegade-immortal-xian-ni-episode-167-lucifer-donghua.m3u8"]);
+  assert.deepEqual(await url(77), ["https://cdn.example.net/renegade-immortal-xian-ni-ep-77.m3u8"]);
+  assert.deepEqual(await url(9), ["https://cdn.example.net/renegade-immortal-xian-ni-ep-09.m3u8"]);
+  assert.deepEqual(await url(84), ["https://cdn.example.net/renegade-immortal-xian-ni-episode-84.m3u8"]);
+});
