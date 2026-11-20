@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.1.0";
+var VERSION = "1.2.0";
 // true: when nothing is found, show one "⚠" card that says why. Set to false to hide it.
 var SHOW_DIAGNOSTICS = true;
 var PROVIDER = "Bilibili";
@@ -20,17 +20,27 @@ var QUALITY_LABELS = { "120": "4K", "116": "1080p60", "112": "1080p+", "80": "10
 function log(msg) {
   try { console.log("[BilibiliPublic v" + VERSION + "] " + String(msg)); } catch (e) {}
 }
-// Why a lookup returned nothing, shown as one "⚠" card. Higher stages are further along and win over lower ones.
-var diag = { stage: 0, text: "" };
-function why(stage, text) {
+// Why a lookup returned nothing, shown as one "⚠" card. Nuvio's card displays only `name` (bold line) and `quality`
+// (line below), so the short cause goes into `name` and the detail into `quality`; `title` keeps the full sentence.
+// Higher stages are further along and win over lower ones.
+var diag = { stage: 0, text: "", short: "", detail: "" };
+function clip(text, n) { text = String(text || ""); return text.length > n ? text.slice(0, n - 1) + "…" : text; }
+function why(stage, text, short, detail) {
   log("why[" + stage + "]: " + text);
-  if (stage >= diag.stage) { diag.stage = stage; diag.text = text; }
+  if (stage >= diag.stage) { diag.stage = stage; diag.text = text; diag.short = short || ""; diag.detail = detail || ""; }
 }
 function diagnosticCards() {
   var on = typeof SHOW_DIAGNOSTICS !== "undefined" && SHOW_DIAGNOSTICS;
   if (!on || (typeof DISABLE_DIAGNOSTICS !== "undefined" && DISABLE_DIAGNOSTICS)) return [];
-  return [{ name: "⚠ " + PROVIDER, title: "Tidak ada stream: " + (diag.text || "penyebab tidak diketahui"), url: "https://www.bilibili.com/", quality: "Info", headers: { "User-Agent": UA } }];
+  return [{
+    name: "⚠ " + (diag.short || "Penyebab tidak diketahui"),
+    title: "Tidak ada stream: " + (diag.text || "penyebab tidak diketahui"),
+    url: "https://www.bilibili.com/",
+    quality: clip(diag.detail, 150) || "Info",
+    headers: { "User-Agent": UA }
+  }];
 }
+function who(url) { return /themoviedb/i.test(String(url)) ? "TMDB" : "Bilibili"; }
 function hostName(u) {
   var m = /^https?:\/\/([^/:?#]+)/i.exec(String(u || ""));
   return m ? m[1].toLowerCase() : "?";
@@ -69,7 +79,7 @@ function requestJson(url, referer, deadline, extraHeaders) {
   return fetch(url, { method: "GET", headers: headers, redirect: "follow" }).then(function (r) {
     if (!r || !r.ok) {
       log("HTTP request failed: " + (r ? r.status : "no response"));
-      why(2, hostName(url) + " menjawab HTTP " + (r ? r.status : "tanpa respons"));
+      why(2, hostName(url) + " menjawab HTTP " + (r ? r.status : "tanpa respons"), who(url) + " menjawab HTTP " + (r ? r.status : "tanpa respons"), hostName(url));
       return null;
     }
     return r.text().then(function (body) {
@@ -77,19 +87,19 @@ function requestJson(url, referer, deadline, extraHeaders) {
         var data = JSON.parse(body);
         if (data && typeof data.code === "number" && data.code !== 0) {
           log("API menolak request code=" + data.code);
-          why(2, hostName(url) + " menolak permintaan (code " + data.code + (data.message ? ": " + data.message : "") + ")");
+          why(2, hostName(url) + " menolak permintaan (code " + data.code + (data.message ? ": " + data.message : "") + ")", who(url) + " menolak (code " + data.code + ")", data.message || hostName(url));
           return null;
         }
         return data;
       } catch (e) {
         log("API response is not valid JSON");
-        why(2, hostName(url) + " mengirim jawaban yang bukan JSON");
+        why(2, hostName(url) + " mengirim jawaban yang bukan JSON", "Jawaban " + who(url) + " bukan JSON", hostName(url));
         return null;
       }
     });
   }).catch(function (e) {
     log("request error: " + (e && e.message ? e.message : e));
-    why(2, "tidak bisa terhubung ke " + hostName(url) + " (" + (e && e.message ? e.message : e) + ")");
+    why(2, "tidak bisa terhubung ke " + hostName(url) + " (" + (e && e.message ? e.message : e) + ")", "Tidak bisa terhubung", hostName(url) + " (" + (e && e.message ? e.message : e) + ")");
     return null;
   });
 }
@@ -173,6 +183,13 @@ function videoInfo(item, deadline) {
     });
   });
 }
+function formatSize(bytes) {
+  var b = Number(bytes);
+  if (!(b > 0)) return "";
+  if (b >= 1073741824) return (b / 1073741824).toFixed(2) + " GB";
+  if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB";
+  return Math.max(1, Math.round(b / 1024)) + " KB";
+}
 // Android blocks cleartext HTTP, and Bilibili often hands out http:// links; its CDNs answer on HTTPS too.
 function usableUrl(u) {
   if (typeof u !== "string") return "";
@@ -191,7 +208,9 @@ function probe(url, headers, deadline) {
   h.Range = "bytes=0-1";
   return fetch(url, { method: "GET", headers: h, redirect: "follow" }).then(function (r) {
     var status = Number(r && r.status) || (r && r.ok === false ? 500 : 200);
-    return { ok: status === 200 || status === 206, status: status };
+    var range = r && r.headers && typeof r.headers.get === "function" ? r.headers.get("content-range") : "";
+    var total = /\/(\d+)\s*$/.exec(String(range || ""));
+    return { ok: status === 200 || status === 206, status: status, size: total ? Number(total[1]) : 0 };
   }).catch(function (e) {
     return { ok: false, status: 0, error: e && e.message ? e.message : String(e) };
   });
@@ -223,28 +242,34 @@ function playUrl(info, deadline) {
     // upos-* mirrors are the reliable ones.
     urls.sort(function (a, b) { return (/upos-/.test(hostName(b)) ? 1 : 0) - (/upos-/.test(hostName(a)) ? 1 : 0); });
     if (!urls.length) {
-      why(4, "Bilibili tidak memberi URL video yang bisa diputar untuk '" + info.title + "' (tidak ada, atau hanya CDN yang tidak didukung)");
+      why(4, "Bilibili tidak memberi URL video yang bisa diputar untuk '" + info.title + "' (tidak ada, atau hanya CDN yang tidak didukung)",
+        "Tidak ada URL yang bisa diputar", "hanya CDN yang tidak didukung: '" + clip(info.title, 40) + "'");
       return [];
     }
     var headers = { "Referer": referer, "Origin": "https://www.bilibili.com", "User-Agent": UA, "Accept": "*/*" };
     var label = QUALITY_LABELS[d.quality ? String(d.quality) : ""] || "Auto";
+    var knownSize = Number(Array.isArray(d.durl) && d.durl[0] && d.durl[0].size) || 0; // bytes, as reported by playurl
     return Promise.all(urls.slice(0, 3).map(function (u) {
       return probe(u, headers, deadline).then(function (res) { res.url = u; return res; });
     })).then(function (results) {
       var good = results.filter(function (x) { return x.ok; });
       if (!good.length) {
         var first = results[0];
-        why(5, "Bilibili menolak pemutaran (" + (first.status ? "HTTP " + first.status : first.error) + ") untuk '" + info.title + "'");
+        why(5, "Bilibili menolak pemutaran (" + (first.status ? "HTTP " + first.status : first.error) + ") untuk '" + info.title + "'",
+          "CDN menolak pemutaran (" + (first.status ? "HTTP " + first.status : first.error) + ")", "'" + clip(info.title, 50) + "'");
         return [];
       }
       return good.map(function (x, n) {
-        return {
+        var size = formatSize(knownSize || x.size);
+        var stream = {
           name: PROVIDER,
-          title: info.title + (good.length > 1 ? " • CDN " + (n + 1) : ""),
+          title: info.title + (good.length > 1 ? " • CDN " + (n + 1) : "") + (size ? " • " + size : ""),
           url: x.url,
-          quality: label,
+          quality: label + (size ? " • " + size : ""),
           headers: headers
         };
+        if (size) stream.size = size;
+        return stream;
       });
     });
   });
@@ -254,11 +279,11 @@ function getStreams(tmdbId, mediaType, season, episode) {
   type = type === "movie" || type === "film" ? "movie" : "tv";
   var ep = Math.max(1, Number(episode) || 1);
   var deadline = Date.now() + TIMEOUT_MS;
-  diag = { stage: 0, text: "" };
+  diag = { stage: 0, text: "", short: "", detail: "" };
   log("start type=" + type + " tmdb=" + tmdbId + (type === "tv" ? " episode=" + ep : ""));
   return tmdbTitle(tmdbId, type, deadline).then(function (meta) {
     if (!meta || !meta.title) {
-      if (diag.stage < 2) why(1, "judul TMDB tidak bisa dibaca (periksa TMDB_API_KEY di Nuvio)");
+      if (diag.stage < 2) why(1, "judul TMDB tidak bisa dibaca (periksa TMDB_API_KEY di Nuvio)", "Judul TMDB tidak terbaca", "periksa TMDB_API_KEY di Nuvio");
       return diagnosticCards();
     }
     log("TMDB title: " + meta.title + " / original: " + meta.originalTitle);
@@ -274,7 +299,8 @@ function getStreams(tmdbId, mediaType, season, episode) {
       items = items.slice(0, MAX_RESULTS);
       if (!items.length) {
         log("No matching public videos found");
-        if (diag.stage < 2) why(3, "tidak ada video Bilibili yang cocok dengan '" + meta.title + "'" + (type === "tv" ? " episode " + ep : ""));
+        if (diag.stage < 2) why(3, "tidak ada video Bilibili yang cocok dengan '" + meta.title + "'" + (type === "tv" ? " episode " + ep : ""),
+          "Video tidak ditemukan", "tidak ada hasil cocok untuk '" + clip(meta.title, 40) + "'" + (type === "tv" ? " episode " + ep : ""));
         return diagnosticCards();
       }
       var shortClips = 0;
@@ -297,7 +323,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         }
         log("Public streams found: " + out.length);
         if (!out.length) {
-          if (shortClips && diag.stage < 4) why(3, "hanya klip pendek (kurang dari 8 menit) yang cocok dengan '" + meta.title + "'");
+          if (shortClips && diag.stage < 4) why(3, "hanya klip pendek (kurang dari 8 menit) yang cocok dengan '" + meta.title + "'", "Hanya klip pendek", "kurang dari 8 menit untuk '" + clip(meta.title, 40) + "'");
           return diagnosticCards();
         }
         return out;
@@ -305,7 +331,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     });
   }).catch(function (e) {
     log("getStreams error: " + (e && e.message ? e.message : e));
-    if (!diag.text) why(0, "kesalahan tak terduga: " + (e && e.message ? e.message : e));
+    if (!diag.text) why(0, "kesalahan tak terduga: " + (e && e.message ? e.message : e), "Kesalahan tak terduga", String(e && e.message ? e.message : e));
     return diagnosticCards();
   });
 }
