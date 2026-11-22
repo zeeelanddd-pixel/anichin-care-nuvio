@@ -3,12 +3,12 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.2.1";
+var VERSION = "1.2.2";
 // true: when nothing is found, show one "⚠" card that says why. Set to false to hide it.
 var SHOW_DIAGNOSTICS = true;
 var PROVIDER = "Bilibili";
 var API = "https://api.bilibili.com";
-var UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36";
+var UA = "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? String(TMDB_API_KEY) : "";
 var TIMEOUT_MS = 35000;
 var MAX_RESULTS = 8;
@@ -64,6 +64,20 @@ function score(a, b) {
   for (var i = 0; i < bb.length; i++) if (bb[i]) set[bb[i]] = true;
   for (var j = 0; j < aa.length; j++) if (aa[j] && set[aa[j]]) hit++;
   return aa.length && bb.length ? 2 * hit / (aa.length + bb.length) : 0;
+}
+function parseDurationSec(v) {
+  if (typeof v === "number") return v > 0 ? v : 0;
+  var s = String(v || "").trim();
+  if (!s) return 0;
+  if (/^\d+$/.test(s)) return Number(s);
+  var parts = s.split(":");
+  if (parts.length < 2 || parts.length > 3) return 0;
+  var total = 0;
+  for (var i = 0; i < parts.length; i++) {
+    if (!/^\d+$/.test(parts[i])) return 0;
+    total = total * 60 + Number(parts[i]);
+  }
+  return total;
 }
 function requestJson(url, referer, deadline, extraHeaders) {
   if (Date.now() > deadline) return Promise.resolve(null);
@@ -122,12 +136,17 @@ function tmdbTitle(id, type, deadline) {
   });
 }
 function searchVideos(title, episode, type, deadline) {
-  var queries = type === "tv" ? [
+  var isCjk = /[\u3400-\u9fff]/.test(String(title || ""));
+  var queries = type === "tv" ? (isCjk ? [
+    title + " 第" + episode + "集",
+    title + " " + episode,
+    title
+  ] : [
     title + " episode " + episode,
     title + " ep " + episode,
     title + " " + episode,
     title
-  ] : [title];
+  ]) : [title];
   return Promise.all(queries.map(function (query) {
     var url = API + "/x/web-interface/search/type?search_type=video&page=1&order=totalrank&keyword=" + encodeURIComponent(query);
     return requestJson(url, "https://search.bilibili.com/", deadline).then(function (j) {
@@ -154,31 +173,61 @@ function searchVideos(title, episode, type, deadline) {
         var key = bvid || String(aid);
         if (seen[key]) continue;
         seen[key] = true;
-        out.push({ bvid: bvid, aid: aid, title: name, score: titleScore });
+        var dur = parseDurationSec(x.duration);
+        var isFullLength = dur === 0 || dur >= MIN_SECONDS;
+        out.push({ bvid: bvid, aid: aid, title: name, score: titleScore, duration: dur, full: isFullLength });
       }
     }
-    out.sort(function (a, b) { return b.score - a.score; });
+    // Full-length episodes (>= 8 min) must be ranked ahead of short clips before slicing to MAX_RESULTS.
+    out.sort(function (a, b) {
+      return (b.full ? 1 : 0) - (a.full ? 1 : 0) || b.score - a.score;
+    });
     return out.slice(0, MAX_RESULTS);
   });
 }
-function videoInfo(item, deadline) {
+function pickPage(pages, episode, fallbackTitle, fallbackCid, fallbackDuration) {
+  if (!Array.isArray(pages) || !pages.length) {
+    return fallbackCid ? { cid: Number(fallbackCid), title: fallbackTitle, duration: Number(fallbackDuration || 0) } : null;
+  }
+  var ep = Math.max(1, Number(episode) || 1);
+  if (pages.length > 1) {
+    var epRe = new RegExp("(?:第\\s*0*" + ep + "\\s*[集话話]|\\b(?:episode|ep|p)?\\s*0*" + ep + "\\b)", "i");
+    for (var i = 0; i < pages.length; i++) {
+      var p = pages[i] || {};
+      if (p.cid && (Number(p.page) === ep || epRe.test(String(p.part || "")))) {
+        var partName = clean(p.part || "");
+        return {
+          cid: Number(p.cid),
+          title: partName ? fallbackTitle + " • " + partName : fallbackTitle,
+          duration: Number(p.duration || fallbackDuration || 0)
+        };
+      }
+    }
+  }
+  var first = pages[0] || {};
+  var cid = Number(fallbackCid || first.cid || 0);
+  return cid ? { cid: cid, title: fallbackTitle, duration: Number(fallbackDuration || first.duration || 0) } : null;
+}
+function videoInfo(item, episode, deadline) {
   var key = item.bvid ? "bvid=" + encodeURIComponent(item.bvid) : "aid=" + item.aid;
   return requestJson(API + "/x/web-interface/view?" + key, "https://www.bilibili.com/", deadline).then(function (j) {
     var d = j && j.data;
-    if (d && d.cid && d.bvid) {
-      return { bvid: d.bvid, cid: Number(d.cid), title: clean(d.title || item.title), duration: Number(d.duration || 0) };
+    if (d && (d.cid || (Array.isArray(d.pages) && d.pages.length)) && d.bvid) {
+      var picked = pickPage(d.pages, episode, clean(d.title || item.title), d.cid, d.duration);
+      if (picked) return { bvid: d.bvid, cid: picked.cid, title: picked.title, duration: picked.duration };
     }
     if (!item.bvid) return null;
     // Public pagelist endpoint as a non-authenticated fallback when /view is unavailable.
     return requestJson(API + "/x/player/pagelist?bvid=" + encodeURIComponent(item.bvid) + "&jsonp=jsonp",
       "https://www.bilibili.com/video/" + item.bvid + "/", deadline).then(function (pageData) {
       var pages = pageData && pageData.data;
-      if (!Array.isArray(pages) || !pages.length || !pages[0].cid) return null;
+      var picked = pickPage(pages, episode, clean(item.title), 0, 0);
+      if (!picked) return null;
       return {
         bvid: item.bvid,
-        cid: Number(pages[0].cid),
-        title: clean(item.title),
-        duration: Number(pages[0].duration || 0)
+        cid: picked.cid,
+        title: picked.title,
+        duration: picked.duration
       };
     });
   });
@@ -295,7 +344,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         var candidate = groups[gi][gj], key = candidate.bvid || String(candidate.aid);
         if (!itemSeen[key]) { itemSeen[key] = true; items.push(candidate); }
       }
-      items.sort(function (a, b) { return b.score - a.score; });
+      items.sort(function (a, b) { return (b.full ? 1 : 0) - (a.full ? 1 : 0) || b.score - a.score; });
       items = items.slice(0, MAX_RESULTS);
       if (!items.length) {
         log("No matching public videos found");
@@ -305,7 +354,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
       }
       var shortClips = 0;
       return Promise.all(items.map(function (item) {
-        return videoInfo(item, deadline).then(function (info) {
+        return videoInfo(item, ep, deadline).then(function (info) {
           if (!info) return [];
           if (info.duration && info.duration < MIN_SECONDS) { shortClips++; log("skip short video: " + info.title); return []; }
           return playUrl(info, deadline);
@@ -336,3 +385,4 @@ function getStreams(tmdbId, mediaType, season, episode) {
   });
 }
 module.exports = { getStreams: getStreams };
+            
