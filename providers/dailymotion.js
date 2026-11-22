@@ -4,7 +4,7 @@
  * player-metadata endpoint that Dailymotion's own embed uses. Private, password-protected and restricted
  * videos are not touched. Does not bypass challenges, login requirements, tokens, or access restrictions.
  */
-var VERSION = "1.0.0";
+var VERSION = "1.0.1";
 var PROVIDER = "Dailymotion";
 var API = "https://api.dailymotion.com";
 var WATCH = "https://www.dailymotion.com";
@@ -251,8 +251,8 @@ function headSize(url, headers, deadline) {
     return len > 0 ? len : 0;
   }).catch(function () { return 0; });
 }
-// Progressive MP4 files get their size in the visible "quality" line (Nuvio's card shows only name and quality),
-// in the title, and in `size`. HLS has no single file, so it is left alone.
+// Progressive MP4 files get their size in `size` (Nuvio's card prints it after the quality, "720p • 245.3 MB") and in the
+// title; it is not repeated in `quality`. HLS has no single file, so it is left alone.
 function addSizes(streams, deadline) {
   var until = Math.min(deadline, Date.now() + SIZE_BUDGET_MS);
   return Promise.all(streams.map(function (st) {
@@ -262,7 +262,6 @@ function addSizes(streams, deadline) {
       var text = formatSize(sizes[i]);
       if (!text) continue;
       streams[i].size = text;
-      streams[i].quality = streams[i].quality + " • " + text;
       streams[i].title = streams[i].title + " • " + text;
     }
     return streams;

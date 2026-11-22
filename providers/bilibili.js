@@ -3,7 +3,7 @@
  * Uses Bilibili's publicly accessible web API only.
  * No login cookies, signature bypass, paywall bypass, or restricted-content access.
  */
-var VERSION = "1.2.0";
+var VERSION = "1.2.1";
 // true: when nothing is found, show one "⚠" card that says why. Set to false to hide it.
 var SHOW_DIAGNOSTICS = true;
 var PROVIDER = "Bilibili";
@@ -265,7 +265,7 @@ function playUrl(info, deadline) {
           name: PROVIDER,
           title: info.title + (good.length > 1 ? " • CDN " + (n + 1) : "") + (size ? " • " + size : ""),
           url: x.url,
-          quality: label + (size ? " • " + size : ""),
+          quality: label, // Nuvio prints `size` after the quality itself; repeating it showed "480p • 165.2 MB • 165.2 MB"
           headers: headers
         };
         if (size) stream.size = size;

@@ -5,10 +5,10 @@
  *
  * Site-specific settings are the variables below. Everything between the
  * SHARED ENGINE markers is identical in anichin-care.js, animexin.js,
- * donghuastream.js, donghuaking.js and luciferdonghua.js (all five sites use the same WordPress theme). Edit it in
+ * donghuastream.js and luciferdonghua.js (all four sites use the same WordPress theme). Edit it in
  * anichin-care.js, then run `node tools/sync-engine.js`; the contract test fails if they differ.
  */
-var VERSION = "1.8.0";
+var VERSION = "1.9.0";
 var PROVIDER = "LuciferDonghua";
 var LOG_NAME = "LuciferDonghuaCare";
 var BASE = "https://luciferdonghua.in";
@@ -359,6 +359,11 @@ function rankCandidates(items, title, season) {
   }
   return out.slice(0, 5);
 }
+// True when the ranked list already holds the series page itself (not just episode posts or a movie page).
+function hasSeriesPage(ranked) {
+  for (var i = 0; i < ranked.length; i++) if (!isEpisodeTitle(ranked[i].title) && ranked[i].score >= 0.95) return true;
+  return false;
+}
 function searchTitle(title, season, deadline) {
   var queries = queryVariants(title), i = 0;
   function sample(items) { return items.slice(0, 2).map(function (x) { return clip(x.title, 34); }).join(" | "); }
@@ -367,10 +372,11 @@ function searchTitle(title, season, deadline) {
     var q = queries[i++];
     return wpSearch(q, deadline).then(function (items) {
       var ranked = rankCandidates(items, title, season);
-      if (ranked.length) return ranked;
-      // The REST search can return only unrelated posts; try the site's HTML search too.
+      if (hasSeriesPage(ranked)) return ranked;
+      // The REST search often lacks the series page itself (only episode posts or a movie page come back);
+      // the site's own search lists it, so ask that too and rank both together.
       return htmlSearch(q, deadline).then(function (html) {
-        var found = rankCandidates(html, title, season);
+        var found = rankCandidates(items.concat(html), title, season);
         if (found.length) return found;
         var seen = sample(items.length ? items : html);
         trace("'" + q + "': wp " + items.length + ", cari " + html.length + (seen ? " [" + seen + "]" : ""));
@@ -488,7 +494,7 @@ function parseServerLinks(html, pageUrl) {
     var data = /\bdata-(?:embed|video|iframe)=["']([^"']+)["']/gi, dm;
     while ((dm = data.exec(html))) add(dm[1], "Mirror", false);
   }
-  // The page's default player is not always in the dropdown (DonghuaKing), so always read the iframes too.
+  // The page's default player is not always in the dropdown, so always read the iframes too.
   var iframe = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi, fm, count = 0;
   while ((fm = iframe.exec(html)) && count < 8) { add(fm[1], "Mirror", false); count++; }
   out.skipped = Object.keys(skipped);
@@ -500,24 +506,64 @@ function parseServerLinks(html, pageUrl) {
 // Items: { url, quality ("720p" | "Auto"), height, referer, trusted }. resolveServer adds serverLabel + source.
 // Generic scan: media URLs published as plain text in HTML or JSON.
 function directMediaUrls(text, pageUrl) {
-  var src = String(text || "").replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/&amp;/g, "&");
-  var found = [], seen = {}, re = /https?:[^"'\s<>\\]+/gi, m;
-  while ((m = re.exec(src)) && found.length < MAX_RESULTS) {
-    var u = absUrl(m[0].replace(/[),;]+$/, ""), pageUrl);
-    if (!u || !isMedia(u) || !hostOf(u) || seen[u]) continue;
+  var src = String(text || "").replace(/\\u0026/g, "&").replace(/\\u002f/gi, "/").replace(/\\\//g, "/").replace(/&amp;/g, "&");
+  var found = [], seen = {}, m;
+  function add(raw) {
+    var u = absUrl(raw.replace(/[),;]+$/, ""), pageUrl);
+    if (!u || !isMedia(u) || !hostOf(u) || seen[u] || found.length >= MAX_RESULTS) return;
     seen[u] = true;
     found.push(u);
   }
+  var abs = /https?:[^"'\s<>\\]+/gi;
+  while ((m = abs.exec(src))) add(m[0]);
+  // Players also write media as "/media/video.mp4" or "//cdn.example/video.m3u8" (source/video tags, JSON config).
+  var rel = /["'(=]\s*((?:\/\/|\/|\.{1,2}\/)[^"'\s<>\\()]*\.(?:m3u8|mp4)(?:\?[^"'\s<>\\()]*)?)["')]/gi;
+  while ((m = rel.exec(src))) add(m[1]);
   return found;
 }
 function genericItems(text, pageUrl) {
   return directMediaUrls(text, pageUrl).map(function (u) { return { url: u, referer: pageUrl }; });
 }
-function resolveGeneric(server, deadline) {
+// A short description of an embed page that gave no video link, so the "⚠" card can say what kind of page it is.
+function embedHints(text, pageUrl) {
+  var hints = [];
+  var frame = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/i.exec(text);
+  if (frame) { var fh = hostOf(absUrl(frame[1], pageUrl)); if (fh) hints.push("iframe " + fh); }
+  if (/eval\(function\(p,a,c,k,e,d\)/.test(text)) hints.push("skrip tersandi");
+  if (/\batob\(/.test(text)) hints.push("base64");
+  if (/<video\b|<source\b/i.test(text)) hints.push("tag video");
+  var player = /(jwplayer|plyr|video\.js|videojs|hls\.js|clappr|artplayer|dplayer)/i.exec(text);
+  if (player) hints.push(player[1].toLowerCase());
+  return hints.join(", ") || "tanpa pemutar";
+}
+// Wrapper pages: an embed page that only holds an iframe to a player on a host this project can read.
+function nestedPlayers(text, pageUrl, selfHost) {
+  var out = [], seen = {}, re = /<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi, m;
+  while ((m = re.exec(text)) && out.length < 2) {
+    var u = absUrl(m[1], pageUrl), h = hostOf(u);
+    if (!u || !h || h === selfHost || seen[u] || !(isKnownHost(h) || isMedia(u))) continue;
+    seen[u] = true; out.push(u);
+  }
+  return out;
+}
+function resolveGeneric(server, deadline, depth) {
   return fetchText(server.url, BASE + "/", deadline).then(function (r) {
     if (!r) return [];
     var items = genericItems(r.text, r.url);
-    if (!items.length) warn(hostOf(server.url) + ": halaman embed tidak memuat tautan video");
+    if (items.length) return items;
+    var nested = (depth || 0) < 1 ? nestedPlayers(r.text, r.url, hostOf(r.url)) : [];
+    if (nested.length) {
+      log("Embed page wraps " + nested.length + " readable player(s); following them one level");
+      return Promise.all(nested.map(function (u) {
+        return resolveServer({ url: u, label: server.label }, deadline, 1).catch(function () { return []; });
+      })).then(function (lists) {
+        var all = [];
+        for (var i = 0; i < lists.length; i++) all = all.concat(lists[i]);
+        if (!all.length) warn(hostOf(server.url) + ": pemutar di dalam halaman embed tidak memberi tautan video");
+        return all;
+      });
+    }
+    warn(hostOf(server.url) + ": halaman embed tidak memuat tautan video (" + Math.max(1, Math.round(r.text.length / 1024)) + " KB; " + embedHints(r.text, r.url) + ")");
     return items;
   });
 }
@@ -651,7 +697,7 @@ function resolveRumble(server, deadline) {
     return genericItems(r.text, r.url).map(function (it) { it.referer = server.url; return it; });
   });
 }
-function resolveServer(server, deadline) {
+function resolveServer(server, deadline, depth) {
   var h = hostOf(server.url), items;
   if (isMedia(server.url)) {
     items = Promise.resolve([{ url: server.url, referer: BASE + "/" }]);
@@ -664,13 +710,17 @@ function resolveServer(server, deadline) {
   } else if (h === "rumble.com" && /\/embed\//i.test(server.url)) {
     items = resolveRumble(server, deadline);
   } else {
-    items = resolveGeneric(server, deadline);
+    items = resolveGeneric(server, deadline, depth);
   }
   return items.then(function (list) { return tagItems(list, server); });
 }
 function tagItems(list, server) {
   var source = sourceName(hostOf(server.url));
-  for (var i = 0; i < list.length; i++) { list[i].source = source; list[i].serverLabel = server.label; }
+  for (var i = 0; i < list.length; i++) {
+    // items that came from a player nested inside an embed page keep their own source ("Dailymotion", not the wrapper site)
+    if (!list[i].source) list[i].source = source;
+    if (!list[i].serverLabel) list[i].serverLabel = server.label;
+  }
   return list;
 }
 
@@ -738,8 +788,8 @@ function headSize(url, headers, deadline) {
     return len > 0 ? len : 0;
   }).catch(function () { return 0; });
 }
-// Progressive files get their size in the visible "quality" line (Nuvio's card shows only name and quality),
-// in the title, and in `size`. HLS has no single file, so it is left alone.
+// Progressive files get their size in `size` (Nuvio's card prints it after the quality, "480p • 165.2 MB") and in the
+// title. It is NOT added to `quality`: that showed "480p • 165.2 MB • 165.2 MB". HLS has no single file, so it is left alone.
 function addSizes(streams, deadline) {
   var until = Math.min(deadline, Date.now() + SIZE_BUDGET_MS);
   return Promise.all(streams.map(function (st) {
@@ -752,7 +802,6 @@ function addSizes(streams, deadline) {
       delete streams[i].sizeBytes;
       if (!text) continue;
       streams[i].size = text;
-      streams[i].quality = streams[i].quality + " • " + text;
       streams[i].title = streams[i].title + " • " + text;
     }
     return streams;
@@ -785,7 +834,8 @@ function getStreams(tmdbId, mediaType, season, episode) {
         return diagnosticCards();
       }
       log("Candidates: " + candidates.map(function (c) { return c.title; }).join(" | "));
-      var pageTasks = candidates.map(function (candidate) {
+      var info = [];
+      var pageTasks = candidates.map(function (candidate, idx) {
         return fetchText(candidate.url, BASE + "/", deadline).then(function (r) {
           if (!r) return null;
           if (type === "movie") return { page: r };
@@ -799,20 +849,30 @@ function getStreams(tmdbId, mediaType, season, episode) {
           // The search may have returned the episode post itself rather than the series page.
           var own = /\bepisode\s*0*(\d+(?:\.\d+)?)/i.exec(candidate.title);
           if (own && targets.indexOf(Number(own[1])) >= 0) return { page: r };
-          if (diag.stage < 4) {
-            why(4, eps.length
-              ? "'" + candidate.title + "' ditemukan, tetapi episode " + targets.join("/") + " tidak ada (terdaftar " + eps.length + " episode: " + epRange(eps) + ")"
-              : "'" + candidate.title + "' ditemukan, tetapi daftar episodenya tidak terbaca",
-              eps.length ? "Episode " + targets.join("/") + " tidak ada" : "Daftar episode tidak terbaca",
-              eps.length ? "'" + clip(candidate.title, 40) + "' hanya terdaftar " + eps.length + " episode (" + epRange(eps) + ")" : "'" + clip(candidate.title, 40) + "'");
-          }
+          info[idx] = { title: candidate.title, count: eps.length, range: eps.length ? epRange(eps) : "", targets: targets.join("/") };
           return null;
         });
       });
       return Promise.all(pageTasks).then(function (results) {
         var chosen = null;
         for (var k = 0; k < results.length; k++) if (results[k]) { chosen = results[k]; break; }
-        if (!chosen) { log("No matching page or episode was found"); return diagnosticCards(); }
+        if (!chosen) {
+          log("No matching page or episode was found");
+          // Report every candidate in rank order (the series page first), not whichever finished downloading first.
+          var rows = [];
+          for (var q = 0; q < info.length; q++) if (info[q]) rows.push(info[q]);
+          if (rows.length) {
+            var top = rows[0];
+            var others = rows.slice(1).map(function (x) { return "'" + clip(x.title, 28) + "' " + (x.count ? x.count + " episode (" + x.range + ")" : "daftar tidak terbaca"); });
+            why(4, top.count
+              ? "'" + top.title + "' ditemukan, tetapi episode " + top.targets + " tidak ada (terdaftar " + top.count + " episode: " + top.range + ")"
+              : "'" + top.title + "' ditemukan, tetapi daftar episodenya tidak terbaca",
+              top.count ? "Episode " + top.targets + " tidak ada" : "Daftar episode tidak terbaca",
+              (top.count ? "'" + clip(top.title, 40) + "' hanya terdaftar " + top.count + " episode (" + top.range + ")" : "'" + clip(top.title, 40) + "'") +
+                (others.length ? "; " + others.join("; ") : ""));
+          }
+          return diagnosticCards();
+        }
         var pagePromise = chosen.page ? Promise.resolve(chosen.page) : fetchText(chosen.pageUrl, BASE + "/", deadline);
         return pagePromise.then(function (page) {
           if (!page) return null;
