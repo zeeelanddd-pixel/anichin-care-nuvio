@@ -16,14 +16,13 @@ Add this URL in the Nuvio Plugins menu:
 | --- | --- | --- |
 | **Anichin** | yes | Reported working on Renegade Immortal and Beyond Time's Gaze (v1.4.0). |
 | **Animexin** | yes | Reported working on Renegade Immortal, all episodes. v1.5.0 fixes titles with apostrophes ("Beyond Time's Gaze") and continuous episode numbering across seasons. |
-| **DonghuaStream** | yes | The most up to date of the four (Beyond Time's Gaze episode 48 on the day it aired). Offers Dailymotion, Rumble and OK.ru mirrors with multiple subtitles. Reported as returning nothing on the first tests; from 1.7.0 it shows a "⚠" card that says why. |
-| **LuciferDonghua** | yes | Added in 1.8.0. The freshest site checked: it already had Renegade Immortal episode 167 on the day it aired. Dropdown offers Dailymotion (Indo + Eng), Rumble and OK.ru; its VidHide server is not read. Not yet tested by the maintainer. |
-| **DonghuaKing** | yes | Works only for what the site hosts. Its catalogue is partly stale: Renegade Immortal there starts at episode 69 and stops at 121 (December 2025), and many newer titles are missing. Reported as returning nothing on the first tests; the "⚠" card now says why. |
-| **Dailymotion** | yes | Added in 1.8.0. Searches Dailymotion's public API for full episodes and plays public videos, so it works even when the donghua sites are blocked. Matching is strict (episode number, show title, at least 8 minutes, no trailers) because Dailymotion has many unrelated uploads. Not yet tested by the maintainer. |
-| **Bilibili** | yes | Finds videos, but the streams were reported unplayable. 1.1.0 upgrades `http://` links to HTTPS (Android blocks cleartext), asks for MP4 (`platform=html5`), drops the `mcdn`/bare-IP mirrors that players cannot use, skips clips shorter than 8 minutes, and checks every URL with the player's headers before offering it. It searches fan uploads, not official episodes, so many titles still return nothing. |
+| **DonghuaStream** | yes | Reported working (OK.ru streams for Beyond Time's Gaze episode 48). The freshest of the older sites. Older episodes may be missing from the site itself; the "⚠" card lists what the site has. |
+| **LuciferDonghua** | yes | Reported working for recent episodes (a 1.26 GB server on Beyond Time's Gaze episode 48). Older episodes use servers ("WITH ADS #1", "ADS FREE", "V1", "V2") whose embed pages exposed no link; 1.9.0 follows wrapper pages and reads relative links, and the card now describes what such a page contains. |
+| **Dailymotion** | yes | Searches Dailymotion's public API for full episodes and plays public videos. Matching is strict (episode number, show title, at least 8 minutes, no trailers). Many donghua uploads there have been removed ("dihapus karena melanggar Syarat Penggunaan"), which the card reports. |
+| **Bilibili** | yes | Finds fan uploads, not official episodes, and often only short clips. It also answers some requests with HTTP 412 (Bilibili's anti-bot block), which this project does not try to get past; the card says so. Disable it if it only adds noise. |
 | **Odysee** | no | By design it returns only claims with a verifiable reusable license (CC0, Public Domain, CC BY, CC BY-SA; NonCommercial and NoDerivatives are rejected). Donghua are almost never published that way. |
 
-**Anichin, Animexin, DonghuaStream, LuciferDonghua and DonghuaKing** run on the same WordPress theme and share one engine (`providers/anichin-care.js`, `providers/animexin.js`, `providers/donghuastream.js`, `providers/luciferdonghua.js`, `providers/donghuaking.js`); they carry the version of that engine. They look up the site's public pages, read the mirror dropdown and the page's default player, and resolve OK.ru, Rumble, Dailymotion and direct `.m3u8`/`.mp4` embeds, plus a site's own player page. Options labelled "Indonesia" are listed first, and the site's own option text (for example "Hardsub English Ok.ru AX") is kept in the stream title so the subtitle language is visible. Mega, Streamwish and Dood are skipped because they need tokens or scripts that this project does not work around; Dtube and Odysee embeds are tried but their pages expose no media URL, so they usually yield nothing.
+**Anichin, Animexin, DonghuaStream and LuciferDonghua** run on the same WordPress theme and share one engine (`providers/anichin-care.js`, `providers/animexin.js`, `providers/donghuastream.js`, `providers/luciferdonghua.js`); they carry the version of that engine. They look up the site's public pages, read the mirror dropdown and the page's default player, and resolve OK.ru, Rumble, Dailymotion and direct `.m3u8`/`.mp4` embeds, plus a site's own player page. Options labelled "Indonesia" are listed first, and the site's own option text (for example "Hardsub English Ok.ru AX") is kept in the stream title so the subtitle language is visible. Mega, Streamwish and Dood are skipped because they need tokens or scripts that this project does not work around; Dtube and Odysee embeds are tried but their pages expose no media URL, so they usually yield nothing.
 
 None of the providers use login cookies or bypass regional restrictions, paywalls, DRM, challenges, or access controls. If a site blocks a request, the provider returns no streams.
 
@@ -31,7 +30,7 @@ Each provider exports `getStreams(tmdbId, mediaType, season, episode)` and retur
 
 ## File size
 
-Progressive files (MP4) show their size in the line below the bold name, after the quality: `720p • 245.3 MB`. The size comes from what a server already reports: the CDN's answer to a `HEAD` request (so nothing is downloaded), Rumble's own `meta.size`, or Bilibili's `playurl` size. If nobody reports one, no size is shown; nothing is estimated. HLS streams (`Auto`) have no single file and therefore no size. The same text is also in the stream's `title` and `size` fields.
+Progressive files (MP4) show their size after the quality on Nuvio's card: `720p • 245.3 MB`. Nuvio prints the stream's `size` field there itself, so the size is deliberately **not** repeated inside `quality` (an earlier version did, and the phone showed `480p • 165.2 MB • 165.2 MB`). The size comes from what a server already reports: the CDN's answer to a `HEAD` request (so nothing is downloaded), Rumble's own `meta.size`, or Bilibili's `playurl` size. If nobody reports one, no size is shown; nothing is estimated. HLS streams (`Auto`) have no single file and therefore no size. The size is also appended to the stream's `title`.
 
 ## The "⚠" card
 
@@ -66,7 +65,7 @@ This project only reads what a site publishes openly in its pages.
 2. The site is searched with punctuation removed, because a WordPress search treats `Time's` and `Time’s` as different words.
 3. One series page is chosen per series. A page marked "Season N" wins for season N.
 4. The episode is located. TMDB numbers episodes per season while sites usually number them continuously, so on a page without a season marker S2E3 after a 26-episode S1 becomes episode 29. If that episode does not exist yet, nothing is returned rather than a wrong episode.
-5. The mirrors are resolved to direct media URLs.
+5. The mirrors are resolved to direct media URLs. An embed page that only wraps a player on a readable host (Dailymotion, Rumble, OK.ru) is followed one level, and media links written as relative paths (`/media/x.mp4`, `//cdn/x.m3u8`) are read too.
 
 ## TMDB key
 
@@ -75,7 +74,7 @@ The providers read the `TMDB_API_KEY` global that the Nuvio runtime provides. Bo
 ## No streams?
 
 0. **Read the "⚠" card** (see above): it usually names the cause.
-1. **The site does not have it.** Open the site and look for the title and episode. Mirrors differ per site: Anichin, Animexin, DonghuaStream and LuciferDonghua carry most titles, DonghuaKing fewer.
+1. **The site does not have it.** Open the site and look for the title and episode. Mirrors and catalogues differ per site, and older episodes are sometimes missing from a site.
 2. **The mirrors are all unsupported or dead.** Mega, Streamwish and Dood are skipped, and OK.ru, Rumble or Dailymotion videos get deleted.
 3. **Numbering differs.** The site uses its own episode numbers (specials, recaps, merged episodes).
 4. **Find out where it stops.** On a computer with Node 20 or newer, run

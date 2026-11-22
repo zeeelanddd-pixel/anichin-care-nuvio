@@ -1,16 +1,16 @@
 {
   "name": "anichin-care-nuvio",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
-  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, LuciferDonghua, DonghuaKing, Dailymotion and Bilibili (Odysee is included but disabled).",
+  "description": "Nuvio streaming providers for donghua: Anichin, Animexin, DonghuaStream, LuciferDonghua, Dailymotion and Bilibili (Odysee is included but disabled).",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check providers/anichin-care.js && node --check providers/animexin.js && node --check providers/donghuastream.js && node --check providers/luciferdonghua.js && node --check providers/donghuaking.js && node --check providers/dailymotion.js && node --check providers/bilibili.js && node --check providers/odysee.js && node --check tools/sync-engine.js && node --check tools/diagnose.js",
+    "check": "node --check providers/anichin-care.js && node --check providers/animexin.js && node --check providers/donghuastream.js && node --check providers/luciferdonghua.js && node --check providers/dailymotion.js && node --check providers/bilibili.js && node --check providers/odysee.js && node --check tools/sync-engine.js && node --check tools/diagnose.js",
     "sync": "node tools/sync-engine.js",
     "diagnose": "node tools/diagnose.js",
-    "test": "node tests/provider-contract.test.js && node tests/provider-behavior.test.js && node tests/themesia-sites.test.js && node tests/field-reports.test.js && node tests/diagnostics.test.js && node tests/bilibili.test.js && node tests/dailymotion.test.js && node tests/sizes.test.js"
+    "test": "node tests/provider-contract.test.js && node tests/provider-behavior.test.js && node tests/themesia-sites.test.js && node tests/field-reports.test.js && node tests/diagnostics.test.js && node tests/bilibili.test.js && node tests/dailymotion.test.js && node tests/sizes.test.js && node tests/embeds.test.js"
   }
 }

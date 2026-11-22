@@ -2,6 +2,31 @@
 
 Nomor versi di judul adalah nomor rilis repo. Provider berbasis tema (Anichin, Animexin, DonghuaStream, DonghuaKing) berbagi nomor versi; perubahan Bilibili dan Odysee dicatat di entri yang sama dengan versinya sendiri.
 
+## 1.9.0
+
+Berdasarkan screenshot dari HP (Beyond Time’s Gaze episode 48 dan Shrouding the Heavens episode 80).
+
+### Dihapus
+- **DonghuaKing:** situsnya tidak aktif lagi. Kartu "⚠" sendiri yang menunjukkannya: hanya 11 episode untuk Beyond Time’s Gaze dan hanya episode 90–141 untuk Shrouding the Heavens. `providers/donghuaking.js` dan entri manifestnya dihapus. Test mesin yang memakai data bergaya DonghuaKing dipindahkan ke provider LuciferDonghua.
+
+### Perbaikan
+- **Ukuran ganda:** kartu menampilkan `385.5 MB • 385.5 MB` karena ukuran ada di `quality` dan Nuvio menambahkan field `size` sendiri di belakangnya. Kini ukuran hanya di `size` (dan `title`); `quality` tetap label polos. Berlaku di mesin bersama, Dailymotion, dan Bilibili.
+- **Embed Lucifer "WITH ADS #1 / ADS FREE / V1 / V2" tanpa tautan video** (episode ada di situsnya: halaman serialnya mencantumkan sampai episode 190):
+  - Halaman embed yang hanya membungkus pemutar di host yang dikenal (iframe ke Dailymotion, Rumble, OK.ru) kini diikuti satu tingkat. Stream hasilnya memakai nama sumbernya sendiri ("Dailymotion"), bukan nama situs pembungkus, dan label dropdown situs tetap dipertahankan.
+  - Tautan media yang ditulis relatif (`/media/x.mp4`, `./x.mp4`) atau tanpa skema (`//cdn.contoh/x.m3u8`), termasuk yang memakai `\u002F`, kini terbaca.
+  - Bila halaman tetap tak terbaca, kartu menyebut jenisnya: ukuran, host iframe, skrip tersandi (`eval` packed), `atob`, tag video, atau nama pemutar. Contoh: `V2 — luciferdonghua.in: halaman embed tidak memuat tautan video (1 KB; iframe player.contoh, skrip tersandi)`.
+- **Kartu "Episode N tidak ada" menyorot kandidat yang salah:** DonghuaStream melaporkan halaman film ("hanya terdaftar 1 episode (3–3)") karena kandidat pertama yang selesai diunduh yang dicatat. Kini semua kandidat dilaporkan berurutan peringkat, serial lebih dulu: `'Fake Show' hanya terdaftar 35 episode (90–124); 'Fake Show Movie' 1 episode (3–3)`.
+- **Pencarian situs sebagai pelengkap:** pencarian halaman situs kini dijalankan juga bila hasil pencarian REST tidak memuat halaman serial yang persis (hanya postingan episode atau halaman film), dan keduanya diperingkat bersama. Bila REST sudah memuat serialnya, tidak ada permintaan tambahan.
+
+### Temuan dari screenshot yang bukan bug kode
+- **Bilibili** menjawab HTTP 412 (blokir anti-bot); tidak diakali. **Dailymotion** menemukan videonya, tetapi Dailymotion sudah menghapusnya karena melanggar Syarat Penggunaan.
+
+### Versi
+- Provider berbasis tema (Anichin, Animexin, DonghuaStream, LuciferDonghua): 1.9.0. Dailymotion 1.0.1. Bilibili 1.2.1.
+
+### Repo
+- `tests/embeds.test.js` (5 test). Test ukuran kini memastikan `quality` tidak pernah memuat ukuran; test itu gagal di 1.8.0 dengan keluaran persis seperti screenshot.
+
 ## 1.8.0
 
 ### Ukuran file di stream
