@@ -5,7 +5,7 @@
  *   TMDB_API_KEY=<v3 key or v4 token> node tools/diagnose.js <provider> <tmdbId> [tv|movie] [season] [episode]
  *   TMDB_API_KEY=... node tools/diagnose.js animexin 281233 tv 1 5
  *
- * <provider> is a manifest id (anichin, animexin, donghuaking, ...) or a file name.
+ * <provider> is a manifest id (anichin, animexin, donghuastream, ...) or a file name.
  */
 const fs = require("node:fs");
 const path = require("node:path");
