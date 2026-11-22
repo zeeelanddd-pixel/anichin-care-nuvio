@@ -1,5 +1,5 @@
 /*
- * Animexin and DonghuaKing run on the same engine as Anichin. These tests use data shaped like the
+ * Animexin, DonghuaStream and LuciferDonghua run on the same engine as Anichin. These tests use data shaped like the
  * real sites (slug patterns, bracketed titles, typos, language-labelled mirrors) with a mocked network.
  */
 const assert = require("node:assert/strict");
@@ -7,7 +7,8 @@ const test = require("node:test");
 const { load, at, V3, mirrorPage, okPage, rumbleApi, dmMeta, epItem, epList, wpAnd } = require("./helpers");
 
 const AX = "https://animexin.dev";
-const DK = "https://donghuaking.in";
+// Second theme site for the engine tests below (they used data shaped like a site that no longer exists).
+const DK = "https://luciferdonghua.in";
 
 const tmdbTv = (id, body) => at("https://api.themoviedb.org/3/tv/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3, body);
 const tmdbMovie = (id, body) => at("https://api.themoviedb.org/3/movie/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3, body);
@@ -124,8 +125,8 @@ test("animexin: a movie page that only lists its watch page is followed one step
   assert.equal(streams[0].title, "Hardsub Indonesia • cdn.example.net");
 });
 
-/* ===================== DonghuaKing ===================== */
-test("donghuaking: typo 'Deamon', bracketed alias and season tier", async () => {
+/* ===================== Engine behaviours (shown on the LuciferDonghua provider) ===================== */
+test("theme engine: typo 'Deamon', bracketed alias and season tier", async () => {
   const slug = "chang-yuan-tu-the-deamon-hunter-season-2";
   const routes = [
     tmdbTv(88, { name: "The Demon Hunter" }),
@@ -142,14 +143,14 @@ test("donghuaking: typo 'Deamon', bracketed alias and season tier", async () => 
     at(DK + "/azure-legacy-the-deamon-hunter-episode-66-subtitle/", mirrorPage([["Sub Indo OK.ru", "https://ok.ru/videoembed/66"]])),
     at("https://ok.ru/videoembed/66", okPage("dk"))
   ];
-  const { provider, calls } = load("donghuaking.js", routes, V3);
+  const { provider, calls } = load("luciferdonghua.js", routes, V3);
   const streams = await provider.getStreams("88", "tv", 2, 66);
   assert.equal(streams.length, 4);
   assert.equal(streams[0].title, "Sub Indo OK.ru • 720p");
   assert.ok(!calls.some((c) => /season-3-episode-66/.test(c.url)), "season 3 must not be used for season 2");
 });
 
-test("donghuaking: search returns only the episode post; its sidebar list is used", async () => {
+test("theme engine: search returns only the episode post; its sidebar list is used", async () => {
   const show = "Against The Gods Season 2";
   const slug = (n, tail) => "against-the-gods-season-2-episode-" + n + tail + "-indonesia-english-sub";
   const sidebar = epList([
@@ -163,27 +164,27 @@ test("donghuaking: search returns only the episode post; its sidebar list is use
     at(DK + "/" + slug(3, "-33") + "/", sidebar + mirrorPage([["Episode three", "https://cdn.example.net/e3.m3u8"]])),
     at(DK + "/" + slug(2, "-32") + "/", mirrorPage([["Episode two", "https://cdn.example.net/e2.m3u8"]]))
   ];
-  let { provider, calls } = load("donghuaking.js", routes, V3);
+  let { provider, calls } = load("luciferdonghua.js", routes, V3);
   assert.deepEqual((await provider.getStreams("41", "tv", 2, 2)).map((s) => s.url), ["https://cdn.example.net/e2.m3u8"]);
 
   // Asking for the episode that the search result itself is reuses that page (no second download).
-  ({ provider, calls } = load("donghuaking.js", routes, V3));
+  ({ provider, calls } = load("luciferdonghua.js", routes, V3));
   assert.deepEqual((await provider.getStreams("41", "tv", 2, 3)).map((s) => s.url), ["https://cdn.example.net/e3.m3u8"]);
   assert.equal(calls.filter((c) => c.url === DK + "/" + slug(3, "-33") + "/").length, 1);
 });
 
-test("donghuaking: a typo in a one-word title still matches ('Apotheosys' vs 'Apotheosis')", async () => {
+test("theme engine: a typo in a one-word title still matches ('Apotheosys' vs 'Apotheosis')", async () => {
   const routes = [
     tmdbTv(3, { name: "Apotheosis" }),
     wp(DK, "Apotheosis", [{ title: "Apotheosys", url: DK + "/anime/apotheosys/" }]),
     at(DK + "/anime/apotheosys/", epList([epItem(DK, "Apotheosys", 1, "apotheosys-episode-1-subtitle")])),
     at(DK + "/apotheosys-episode-1-subtitle/", mirrorPage([["Server 1", "https://cdn.example.net/a1.m3u8"]]))
   ];
-  const { provider } = load("donghuaking.js", routes, V3);
+  const { provider } = load("luciferdonghua.js", routes, V3);
   assert.deepEqual((await provider.getStreams("3", "tv", 1, 1)).map((s) => s.url), ["https://cdn.example.net/a1.m3u8"]);
 });
 
-test("donghuaking: zero-padded 'Episode 05' is episode 5", async () => {
+test("theme engine: zero-padded 'Episode 05' is episode 5", async () => {
   const routes = [
     tmdbTv(12, { name: "Lord of Mysteries" }),
     wp(DK, "Lord of Mysteries", [{ title: "Lord of Mysteries", url: DK + "/anime/lord-of-mysteries/" }]),
@@ -193,19 +194,19 @@ test("donghuaking: zero-padded 'Episode 05' is episode 5", async () => {
     ])),
     at(DK + "/lord-of-mysteries-episode-05-subtitle/", mirrorPage([["Server 1", "https://cdn.example.net/lom5.m3u8"]]))
   ];
-  const { provider } = load("donghuaking.js", routes, V3);
+  const { provider } = load("luciferdonghua.js", routes, V3);
   const streams = await provider.getStreams("12", "tv", 1, 5);
   assert.deepEqual(streams.map((s) => s.url), ["https://cdn.example.net/lom5.m3u8"]);
 });
 
-test("donghuaking: no results and dead network give [] without throwing", async () => {
-  let { provider } = load("donghuaking.js", [
+test("theme engine: no results and dead network give [] without throwing", async () => {
+  let { provider } = load("luciferdonghua.js", [
     tmdbTv(1, { name: "Nothing Here" }),
     at(DK + "/wp-json/wp/v2/search", []),
     at(DK + "/?s=", "<html></html>")
   ], V3);
   assert.deepEqual(await provider.getStreams("1", "tv", 1, 1), []);
-  ({ provider } = load("donghuaking.js", [], V3));
+  ({ provider } = load("luciferdonghua.js", [], V3));
   assert.deepEqual(await provider.getStreams("1", "tv", 1, 1), []);
 });
 

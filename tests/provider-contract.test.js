@@ -68,6 +68,6 @@ test("every theme-based provider shares an identical engine (after editing it, r
   };
   const reference = engine("anichin-care.js");
   const others = fs.readdirSync(path.join(root, "providers")).filter((f) => f.endsWith(".js") && f !== "anichin-care.js" && read(f).includes(START));
-  assert.ok(others.length >= 3, "expected at least animexin, donghuaking and donghuastream to use the shared engine, found: " + others.join(", "));
+  assert.ok(others.length >= 3, "expected at least animexin, donghuastream and luciferdonghua to use the shared engine, found: " + others.join(", "));
   for (const name of others) assert.equal(engine(name), reference, name + " engine differs from anichin-care.js");
 });

@@ -38,8 +38,8 @@ test("dailymotion: only real episodes of the right show are played; Indonesian u
     "Renegade Immortal EP 166 [English Sub] • Other Channel • 720p",
     "Renegade Immortal EP 166 [English Sub] • Other Channel"
   ]);
-  // the size is in the line Nuvio's card shows (quality), and in `size`; HLS and unanswered HEADs get none
-  assert.deepEqual(streams.map((s) => s.quality), ["720p • 245.3 MB", "Auto", "720p", "Auto"]);
+  // Nuvio prints `size` after the quality itself, so `quality` stays plain; HLS and unanswered HEADs get no size
+  assert.deepEqual(streams.map((s) => s.quality), ["720p", "Auto", "720p", "Auto"]);
   assert.equal(streams[0].size, "245.3 MB");
   assert.equal(streams[1].size, undefined);
   assert.equal(streams[0].url, "https://cdn.dmcdn.net/indo/720.mp4?x=1");

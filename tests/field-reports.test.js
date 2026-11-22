@@ -7,7 +7,7 @@ const test = require("node:test");
 const { load, at, V3, mirrorPage, dmMeta, epItem, epList, wpAnd } = require("./helpers");
 
 const AX = "https://animexin.dev";
-const DK = "https://donghuaking.in";
+const DK = "https://luciferdonghua.in"; // any theme site: these scenarios are about the engine
 const TMDB = (kind, id) => "https://api.themoviedb.org/3/" + kind + "/" + id + "?language=en-US&append_to_response=alternative_titles&api_key=" + V3;
 
 /* ---- Beyond Time's Gaze on Animexin: curly apostrophe + continuous numbering ---- */
@@ -102,12 +102,12 @@ test("animexin: a long TMDB title falls back to its first words, and the series 
   assert.ok(!calls.some((c) => /episode-7-/.test(c.url)), "the episode post must not be downloaded when the series page exists");
 });
 
-/* ---- DonghuaKing: default Dailymotion player outside the dropdown, own player pages ---- */
+/* ---- Default Dailymotion player outside the dropdown, and the site's own player pages ---- */
 function dkRoutes(extra) {
   const ep = "renegade-immortal-episode-100-sub-indo-english-sub";
   const page = '<iframe src="https://geo.dailymotion.com/player/xkyen.html?video=k1I1DS42J4OekjEwTdK"></iframe>' + mirrorPage([
-    ["DonghuaKing Multi Sub Player", DK + "/player/multi/abc"],
-    ["DonghuaKing Indonesia [1080p]", "https://player.unknown-host.example/e/xyz"]
+    ["Site Multi Sub Player", DK + "/player/multi/abc"],
+    ["Site Indonesia [1080p]", "https://player.unknown-host.example/e/xyz"]
   ]);
   return [
     at(TMDB("tv", 62940), { name: "Renegade Immortal" }),
@@ -118,12 +118,12 @@ function dkRoutes(extra) {
   ].concat(extra);
 }
 
-test("donghuaking: reads the default Dailymotion player and the site's own player page", async () => {
+test("theme engine: reads the default Dailymotion player and the site's own player page", async () => {
   const routes = dkRoutes([at("https://www.dailymotion.com/player/metadata/video/k1I1DS42J4OekjEwTdK", dmMeta("kdk"))]);
-  const { provider, calls } = load("donghuaking.js", routes, V3);
+  const { provider, calls } = load("luciferdonghua.js", routes, V3);
   const streams = await provider.getStreams("62940", "tv", 1, 100);
   const byUrl = (u) => streams.find((s) => s.url === u);
-  assert.equal(byUrl("https://cdn.example.net/dk-multi.m3u8").title, "DonghuaKing Multi Sub Player • donghuaking.in");
+  assert.equal(byUrl("https://cdn.example.net/dk-multi.m3u8").title, "Site Multi Sub Player • luciferdonghua.in");
   assert.ok(byUrl("https://www.dailymotion.com/cdn/manifest/video/kdk.m3u8?auth=1"), "default Dailymotion player");
   assert.equal(byUrl("https://cdn.dmcdn.net/kdk/720.mp4?x=1").title, "Dailymotion • 720p");
   assert.equal(streams.length, 3);
@@ -134,10 +134,10 @@ test("dailymotion: a private id that errors on the plain request is retried with
   const id = "k1I1DS42J4OekjEwTdK";
   const routes = dkRoutes([(u) => u.startsWith("https://www.dailymotion.com/player/metadata/video/" + id) &&
     { body: JSON.stringify(u.includes("?") ? dmMeta("kfb") : { error: { title: "Content restricted" } }) }]);
-  const { provider, calls } = load("donghuaking.js", routes, V3);
+  const { provider, calls } = load("luciferdonghua.js", routes, V3);
   const streams = await provider.getStreams("62940", "tv", 1, 100);
   assert.ok(streams.some((s) => s.url === "https://cdn.dmcdn.net/kfb/720.mp4?x=1"));
   // The embedder is Dailymotion's own watch page, never a third-party site.
   assert.ok(calls.some((c) => c.url.includes("embedder=" + encodeURIComponent("https://www.dailymotion.com/video/" + id))));
-  assert.ok(!calls.some((c) => /embedder=[^&]*donghuaking/i.test(c.url)));
+  assert.ok(!calls.some((c) => /embedder=[^&]*luciferdonghua/i.test(c.url)));
 });
